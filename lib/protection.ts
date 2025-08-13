@@ -37,4 +37,3 @@ export const ENV_USERS = Array.from({ length: 10 }, (_, i) => {
   ])
   // Filter out any users that don't have both username and password set
   .filter((user) => user.username && user.password)
-

@@ -9,4 +9,3 @@ export const metadata: Metadata = {
 export default function SpiderEditLayout({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
-

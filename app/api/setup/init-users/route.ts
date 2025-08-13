@@ -25,4 +25,3 @@ export async function POST() {
     return new Response("Failed to create users", { status: 500 })
   }
 }
-

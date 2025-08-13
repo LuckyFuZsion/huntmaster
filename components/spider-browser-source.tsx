@@ -476,4 +476,3 @@ function RotatingStatBox({
     </div>
   )
 }
-

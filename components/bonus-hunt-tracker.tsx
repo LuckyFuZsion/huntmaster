@@ -1198,4 +1198,3 @@ ${slotListInfo}`
     </div>
   )
 }
-

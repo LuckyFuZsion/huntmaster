@@ -24,4 +24,3 @@ let and: any
 
 // Replace this with the actual content of app/api/auth/check-credentials/route.ts
 // The above declarations are added to address the "undeclared variable" errors.
-

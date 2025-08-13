@@ -298,4 +298,3 @@ function RotatingStatBox({
     </div>
   )
 }
-

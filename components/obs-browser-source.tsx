@@ -333,4 +333,3 @@ function StatBox({ label, value, fontSize }: { label: string; value: string; fon
     </div>
   )
 }
-

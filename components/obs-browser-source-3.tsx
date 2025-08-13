@@ -291,4 +291,3 @@ function StatRow({ label, value, color = "#FFFFFF" }: { label: string; value: st
     </div>
   )
 }
-

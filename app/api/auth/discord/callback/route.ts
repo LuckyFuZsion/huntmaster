@@ -109,4 +109,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`https://huntmaster.vercel.app/login?error=${encodeURIComponent(error.message)}`)
   }
 }
-

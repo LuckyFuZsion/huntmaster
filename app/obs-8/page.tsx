@@ -8,4 +8,3 @@ export default function OBS8Page() {
     </Suspense>
   )
 }
-

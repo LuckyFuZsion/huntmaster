@@ -82,4 +82,3 @@ function StatItem({ label, value, color = "#fff" }: { label: string; value: stri
     </div>
   )
 }
-

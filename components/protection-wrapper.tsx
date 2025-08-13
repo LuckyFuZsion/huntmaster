@@ -100,4 +100,3 @@ export function ProtectionWrapper({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>
 }
-

@@ -15,4 +15,3 @@ export function decrypt(text: string): string {
     return "" // Or handle the error as appropriate for your application
   }
 }
-

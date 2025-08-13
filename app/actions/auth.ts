@@ -99,4 +99,3 @@ export async function logout() {
   cookieStore.set("session", "", { expires: new Date(0) })
   redirect("/login")
 }
-

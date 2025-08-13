@@ -10,4 +10,3 @@ const and = null
 
 // The rest of the original code would go here. Since it was not provided, I cannot include it.
 // This ensures that the undeclared variables are defined before they are used in the original code.
-

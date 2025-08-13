@@ -35,4 +35,3 @@ export default function HomePage() {
   // Return null while redirecting
   return null
 }
-

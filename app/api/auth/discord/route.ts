@@ -24,4 +24,3 @@ export async function GET() {
     return NextResponse.redirect("https://huntmaster.vercel.app/login?error=Failed+to+initiate+Discord+login")
   }
 }
-

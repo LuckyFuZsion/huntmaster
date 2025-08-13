@@ -5,4 +5,3 @@ export function middleware(request: NextRequest) {
   // Allow all requests to proceed normally
   return NextResponse.next()
 }
-
