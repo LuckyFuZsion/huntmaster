@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
 interface Slot {
@@ -10,7 +10,7 @@ interface Slot {
   win: number | null
 }
 
-export default function HuntStatisticsSummary() {
+function HuntStatisticsSummaryContent() {
   const [slots, setSlots] = useState<Slot[]>([])
   const [startBalance, setStartBalance] = useState(0)
   const [endBalance, setEndBalance] = useState(0)
@@ -99,6 +99,30 @@ export default function HuntStatisticsSummary() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function HuntStatisticsSummary() {
+  return (
+    <Suspense fallback={
+      <div
+        style={{
+          width: "350px",
+          background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+          borderRadius: "10px",
+          padding: "15px",
+          fontFamily: "'Segoe UI', Arial, sans-serif",
+          color: "#fff",
+        }}
+      >
+        <div style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "15px", textAlign: "center" }}>
+          Hunt Statistics
+        </div>
+        <div style={{ textAlign: "center", color: "#8BB8E8" }}>Loading...</div>
+      </div>
+    }>
+      <HuntStatisticsSummaryContent />
+    </Suspense>
   )
 }
 
