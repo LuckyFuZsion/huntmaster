@@ -1,52 +1,29 @@
-import { sql } from "@vercel/postgres"
-
-export const runtime = "edge"
+import { NextResponse } from "next/server"
+import { firestoreAdmin } from "@/lib/firestore-admin"
 
 export async function GET() {
   try {
-    // Test 1: Basic connection
-    console.log("Testing database connection...")
-    const connectionTest = await sql`SELECT 1 as connection_test`
-    console.log("Connection test result:", connectionTest.rows[0])
+    // Test Firestore connection
+    console.log("Testing Firestore connection...")
+    const users = await firestoreAdmin.users.findAll()
+    console.log("Firestore test result: Found", users.length, "users")
 
-    // Test 2: Check if users table exists
-    console.log("Checking users table...")
-    const tableTest = await sql`
-      SELECT EXISTS (
-        SELECT 1 
-        FROM information_schema.tables 
-        WHERE table_name = 'users'
-      );
-    `
-    console.log("Table test result:", tableTest.rows[0])
-
-    // Test 3: Count users
-    console.log("Counting users...")
-    const userCount = await sql`SELECT COUNT(*) FROM users`
-    console.log("User count:", userCount.rows[0])
-
-    // Return all test results
-    return new Response(
-      JSON.stringify({
-        connection: "success",
-        tableExists: tableTest.rows[0].exists,
-        userCount: userCount.rows[0].count,
-        connectionUrl: process.env.POSTGRES_URL ? "Set" : "Not set",
-      }),
-      {
-        headers: { "Content-Type": "application/json" },
-      },
-    )
+    // Return test results
+    return NextResponse.json({
+      connection: "success",
+      firestore: "connected",
+      userCount: users.length,
+      database: "Firestore",
+    })
   } catch (error) {
-    console.error("Database test error:", error)
-    return new Response(
-      JSON.stringify({
+    console.error("Firestore test error:", error)
+    return NextResponse.json(
+      {
         error: error instanceof Error ? error.message : "Unknown error",
-        connectionUrl: process.env.POSTGRES_URL ? "Set" : "Not set",
-      }),
+        database: "Firestore",
+      },
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
       },
     )
   }
