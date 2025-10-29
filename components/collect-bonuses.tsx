@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,7 +16,7 @@ interface Slot {
   win: number | null
 }
 
-export function CollectBonuses() {
+function CollectBonusesContent() {
   const [slots, setSlots] = useState<Slot[]>([])
   const [isSingleEntry, setIsSingleEntry] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -371,3 +371,19 @@ export function CollectBonuses() {
     }
   `}
 </style>
+
+export function CollectBonuses() {
+  return (
+    <Suspense fallback={
+      <Card className="w-full max-w-[324px] absolute top-0 left-0">
+        <CardContent className="px-2 pt-0">
+          <div className="space-y-4">
+            <div className="text-center text-muted-foreground py-8">Loading...</div>
+          </div>
+        </CardContent>
+      </Card>
+    }>
+      <CollectBonusesContent />
+    </Suspense>
+  )
+}
