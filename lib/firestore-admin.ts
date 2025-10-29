@@ -8,6 +8,9 @@ export interface User {
   username: string
   password?: string
   isAdmin: boolean
+  discordId?: string
+  email?: string
+  isActive?: boolean // Active status - defaults to true for admins, false for new users
   createdAt: Date | Timestamp
 }
 
@@ -74,6 +77,16 @@ export const firestoreAdmin = {
     },
     async findByUsername(username: string): Promise<User | null> {
       const snapshot = await adminDb.collection("users").where("username", "==", username).get()
+      if (snapshot.empty) return null
+      const doc = snapshot.docs[0]
+      return {
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      } as User
+    },
+    async findByDiscordId(discordId: string): Promise<User | null> {
+      const snapshot = await adminDb.collection("users").where("discordId", "==", discordId).get()
       if (snapshot.empty) return null
       const doc = snapshot.docs[0]
       return {

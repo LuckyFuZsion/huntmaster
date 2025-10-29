@@ -8,12 +8,15 @@ import { Eye, EyeOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { login } from "../actions/auth"
 import { FaDiscord } from "react-icons/fa"
+import { InactiveUserModal } from "@/components/inactive-user-modal"
+import { decrypt } from "@/lib/protection"
 
 export function LoginForm() {
   const [error, setError] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [mounted, setMounted] = useState(false)
+  const [showInactiveModal, setShowInactiveModal] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -23,8 +26,25 @@ export function LoginForm() {
     // Check if already logged in
     const session = localStorage.getItem("huntmaster_session")
     if (session) {
-      router.push("/dashboard")
-      return
+      try {
+        // Check if user is inactive in session
+        const sessionData = JSON.parse(decrypt(session))
+        if (sessionData.isActive === false) {
+          setShowInactiveModal(true)
+          return
+        }
+        // User is active, redirect to dashboard
+        router.push("/dashboard")
+        return
+      } catch (e) {
+        // Invalid session, continue to login
+      }
+    }
+
+    // Check for inactive parameter in URL (from Discord callback)
+    const inactiveParam = searchParams.get("inactive")
+    if (inactiveParam === "true") {
+      setShowInactiveModal(true)
     }
 
     // Check for error parameter in URL
@@ -40,7 +60,12 @@ export function LoginForm() {
     startTransition(async () => {
       const result = await login(formData)
 
-      if (result.error) {
+      if (result.inactive) {
+        // User is inactive - show modal
+        setShowInactiveModal(true)
+        // Clear any session if exists
+        localStorage.removeItem("huntmaster_session")
+      } else if (result.error) {
         setError(result.error)
       } else if (result.success && result.session) {
         localStorage.setItem("huntmaster_session", result.session)
@@ -112,6 +137,15 @@ export function LoginForm() {
         <FaDiscord className="h-5 w-5" />
         Login with Discord
       </Button>
+
+      <InactiveUserModal 
+        open={showInactiveModal} 
+        onClose={() => {
+          setShowInactiveModal(false)
+          // Clear session when modal is closed
+          localStorage.removeItem("huntmaster_session")
+        }} 
+      />
     </div>
   )
 }

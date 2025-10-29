@@ -1,0 +1,48 @@
+# Cursor ignore file
+# Files and patterns listed here will be ignored by Cursor
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment files (but allow .env.local explicitly)
+.env
+.env.production
+.env.development
+.env.test
+
+# Explicitly allow .env.local for Cursor access
+!.env.local
+
+# Vercel
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Firebase
+firebase-service-account.json
+*.firebase.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+

@@ -45,6 +45,18 @@ export async function login(formData: FormData) {
       return { error: "Invalid credentials" }
     }
 
+    // Check if user is active - admins are always considered active
+    const isUserActive = user.isAdmin || user.isActive !== false
+
+    if (!isUserActive) {
+      // User is inactive - return inactive flag
+      return {
+        success: false,
+        error: "Account access required",
+        inactive: true,
+      }
+    }
+
     console.log("Login successful for:", user.username)
 
     // Create session
@@ -52,6 +64,7 @@ export async function login(formData: FormData) {
       username: user.username,
       userId: user.id,
       isAdmin: user.isAdmin,
+      isActive: true,
       timestamp: Date.now(),
     }
 

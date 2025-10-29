@@ -1122,6 +1122,13 @@ ${slotListInfo}`
                   <LogOut className="w-5 h-5" />
                 </Button>
               </div>
+              {currentUsername && (
+                <div className="mt-2 flex justify-center">
+                  <span className="text-sm text-gray-400 font-medium">
+                    Signed in as: {currentUsername}
+                  </span>
+                </div>
+              )}
               <div className="mt-2 flex justify-center">
                 <VersionHistory />
               </div>
