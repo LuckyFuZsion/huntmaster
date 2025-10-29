@@ -2,8 +2,6 @@ import { NextResponse } from "next/server"
 import { firestoreAdmin } from "@/lib/firestore-admin"
 import bcrypt from "bcryptjs"
 
-export const runtime = "edge"
-
 export async function POST(request: Request) {
   try {
     const { username, password, isAdmin = false } = await request.json()

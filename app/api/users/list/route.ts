@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import { firestoreAdmin } from "@/lib/firestore-admin"
 
-export const runtime = "edge"
-
 export async function GET() {
   try {
     const users = await firestoreAdmin.users.findAll()
