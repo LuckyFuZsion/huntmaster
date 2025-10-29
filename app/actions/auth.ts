@@ -46,7 +46,8 @@ export async function login(formData: FormData) {
     }
 
     // Check if user is active - admins are always considered active
-    const isUserActive = user.isAdmin || user.isActive !== false
+    // Only users with explicit isActive === true are active (new users default to false)
+    const isUserActive = user.isAdmin || user.isActive === true
 
     if (!isUserActive) {
       // User is inactive - return inactive flag

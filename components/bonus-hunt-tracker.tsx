@@ -159,8 +159,9 @@ export function BonusHuntTracker() {
           if (data.success && data.settings) {
             console.log("Loaded settings from Firestore:", data.settings)
             // Load settings from Firestore - ensure strings are properly converted
-            setStartBalance(data.settings.startBalance != null ? String(data.settings.startBalance) : "")
-            setEndBalance(data.settings.endBalance != null ? String(data.settings.endBalance) : "")
+            // Explicitly handle 0 values to ensure they're preserved as "0" string
+            setStartBalance(data.settings.startBalance != null && data.settings.startBalance !== "" ? String(data.settings.startBalance) : "")
+            setEndBalance(data.settings.endBalance != null && data.settings.endBalance !== "" ? String(data.settings.endBalance) : "")
             setColourTheme(data.settings.colourTheme || "blue")
             setSelectedFont(data.settings.selectedFont || "Arial")
             setFontSize(data.settings.fontSize || 24)
@@ -246,9 +247,11 @@ export function BonusHuntTracker() {
 
     // Save to Firestore
     const saveSettingsToFirestore = async () => {
+      // Explicitly preserve "0" as a string - don't convert to null or empty
+      // Use nullish coalescing to only convert null/undefined, not "0"
       const settingsToSave = {
-        startBalance,
-        endBalance,
+        startBalance: startBalance ?? "",
+        endBalance: endBalance ?? "",  // Preserve "0" - only convert null/undefined to ""
         colourTheme,
         selectedFont,
         fontSize,
@@ -575,7 +578,11 @@ ${slotListInfo}`
                 type="number"
                 placeholder="End Balance"
                 value={endBalance}
-                onChange={(e) => setEndBalance(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value
+                  // Preserve "0" explicitly - if user enters 0, keep it as "0" string
+                  setEndBalance(val === "" ? "" : val)
+                }}
                 className={`w-1/2 ${noSpinnerClass}`}
               />
             </div>
@@ -1303,47 +1310,81 @@ ${slotListInfo}`
               <li>Use the "Collect Bonuses" button to enter win amounts for each bonus round.</li>
               <li>Copy hunt details using the clipboard button at the bottom.</li>
             </ol>
+            <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4">
+              <div className="font-bold">📌 Personalized URLs</div>
+              <p className="mt-1">
+                Each user has their own personalized overlay and widget URLs. The URLs below are specifically for{" "}
+                <strong>{currentUsername || "your account"}</strong>. Each user's data is isolated, so your overlays will only show your hunt information.
+              </p>
+            </div>
             <h3 className="text-lg font-semibold mt-4">Widget and Browser Source Links</h3>
-            <p>Use these links to add widgets and browser sources to your stream:</p>
+            <p>Use these personalized links to add widgets and browser sources to your stream:</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <WidgetItem
-                url="http://huntmaster.vercel.app/obs"
+                url={`http://huntmaster.vercel.app/obs?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/main-obs-browser-source.png-2RlwuBNGOkYET3pIouxJq3YHoSPoZq.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/obs-2"
+                url={`http://huntmaster.vercel.app/obs-2?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-2.png-k64OYIEnlEcLRCLPPk2CfJ9OcJruFQ.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/obs-3"
+                url={`http://huntmaster.vercel.app/obs-3?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-3.png-9TCrvW2SagQQVoQ9FYu0ORCvoto50o.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/obs-4"
+                url={`http://huntmaster.vercel.app/obs-4?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-4.png-FI75hlCjnnIRoPvTu7gpfJIUwob6DM.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/obs-5"
+                url={`http://huntmaster.vercel.app/obs-5?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/widgets/progress-bar"
+                url={`http://huntmaster.vercel.app/obs-7?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/obs-8?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/progress-bar?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/progress-bar-widget.png-NDrWkJkNn45TPvyo7WZEQvoOcwT9qi.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/widgets/top-wins"
+                url={`http://huntmaster.vercel.app/widgets/top-wins?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/top-wins-widget.png-AxXX4ovkJqoMC4sKZpwRxXTMeFBTJ7.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/widgets/hunt-stats"
+                url={`http://huntmaster.vercel.app/widgets/hunt-stats?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/hunt-stats-widget.png-m4l9PjOT411kJqW9j52rQHMZUyoFZ9.png"
               />
               <WidgetItem
-                url="http://huntmaster.vercel.app/widgets/start-balance"
+                url={`http://huntmaster.vercel.app/widgets/next-bonus?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/start-balance?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/time-date?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/time-date-advanced?theme=neon&user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/ars?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
             </div>
-            <p className="mt-4">To use these in OBS Studio, add a Browser Source and paste the appropriate link.</p>
+            <p className="mt-4">
+              <strong>Important:</strong> These URLs are personalized for your account ({currentUsername || "your username"}). 
+              To use these in OBS Studio, add a Browser Source and paste the appropriate link. Each overlay and widget will display only your hunt data.
+            </p>
           </div>
           <DialogFooter>
             <Button onClick={() => setIsInstructionsDialogOpen(false)}>Close</Button>
