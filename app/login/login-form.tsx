@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Eye, EyeOff } from "lucide-react"
@@ -13,22 +13,26 @@ export function LoginForm() {
   const [error, setError] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [mounted, setMounted] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
+    setMounted(true)
+    
     // Check if already logged in
     const session = localStorage.getItem("huntmaster_session")
     if (session) {
       router.push("/dashboard")
+      return
     }
 
     // Check for error parameter in URL
-    const urlParams = new URLSearchParams(window.location.search)
-    const errorParam = urlParams.get("error")
+    const errorParam = searchParams.get("error")
     if (errorParam) {
       setError(decodeURIComponent(errorParam.replace(/\+/g, " ")))
     }
-  }, [router])
+  }, [router, searchParams])
 
   async function handleSubmit(formData: FormData) {
     setError("")
@@ -50,10 +54,10 @@ export function LoginForm() {
   }
 
   return (
-    <div className="space-y-4">
-      <form action={handleSubmit} className="space-y-4">
+    <div className="space-y-4" suppressHydrationWarning>
+      <form action={handleSubmit} className="space-y-4" suppressHydrationWarning>
         <div className="space-y-2">
-          <Input type="text" name="username" placeholder="Username" disabled={isPending} required />
+          <Input type="text" name="username" placeholder="Username" disabled={isPending} required suppressHydrationWarning />
         </div>
         <div className="space-y-2 relative">
           <div className="relative">
@@ -64,6 +68,7 @@ export function LoginForm() {
               className="pr-10"
               disabled={isPending}
               required
+              suppressHydrationWarning
             />
             <Button
               type="button"
@@ -72,6 +77,7 @@ export function LoginForm() {
               className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
               onClick={() => setShowPassword(!showPassword)}
               disabled={isPending}
+              suppressHydrationWarning
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
@@ -82,7 +88,7 @@ export function LoginForm() {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <Button type="submit" className="w-full" disabled={isPending}>
+        <Button type="submit" className="w-full" disabled={isPending} suppressHydrationWarning>
           {isPending ? "Logging in..." : "Login"}
         </Button>
       </form>
@@ -101,6 +107,7 @@ export function LoginForm() {
         variant="outline"
         className="w-full flex items-center justify-center gap-2 bg-[#5865F2] text-white hover:bg-[#4752C4]"
         onClick={handleDiscordLogin}
+        suppressHydrationWarning
       >
         <FaDiscord className="h-5 w-5" />
         Login with Discord

@@ -108,43 +108,81 @@ export function BonusHuntTracker() {
 
   const router = useRouter()
 
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const [currentUsername, setCurrentUsername] = useState("")
+
   useEffect(() => {
-    // Load data from localStorage
-    const storedSlots = localStorage.getItem("slotList")
-    if (storedSlots) {
-      setSlots(JSON.parse(storedSlots))
-    }
-    const storedStartBalance = localStorage.getItem("startBalance")
-    if (storedStartBalance) {
-      setStartBalance(storedStartBalance)
-    }
-    const storedEndBalance = localStorage.getItem("endBalance")
-    if (storedEndBalance) {
-      setEndBalance(storedEndBalance)
-    }
-    const storedColourTheme = localStorage.getItem("colourTheme")
-    if (storedColourTheme) {
-      setColourTheme(storedColourTheme)
-    }
-    const storedFont = localStorage.getItem("selectedFont")
-    if (storedFont) {
-      setSelectedFont(storedFont)
-    }
-    const storedFontSize = localStorage.getItem("fontSize")
-    if (storedFontSize) {
-      setFontSize(Number.parseInt(storedFontSize))
-    }
-    const storedRadius = localStorage.getItem("cornerRadius")
-    if (storedRadius) {
-      setCornerRadius(storedRadius)
+    const loadSlotsFromFirestore = async () => {
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session) {
+          const response = await fetch("/api/slots", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "get" }),
+          })
+          const data = await response.json()
+          if (data.success && data.slots) {
+            setSlots(data.slots.map((slot: any) => ({
+              id: slot.id,
+              name: slot.name,
+              bet: slot.bet,
+              win: slot.win,
+            })))
+            setInitialLoadComplete(true)
+          }
+        }
+      } catch (error) {
+        console.error("Error loading slots from Firestore:", error)
+        setInitialLoadComplete(true)
+      }
     }
 
-    // Check if user is admin
+    // Load slots from Firestore
+    loadSlotsFromFirestore()
+
+    // Load user settings from Firestore
+    const loadUserSettings = async () => {
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session) {
+          const response = await fetch("/api/user-settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "get" }),
+          })
+          const data = await response.json()
+          if (data.success && data.settings) {
+            console.log("Loaded settings from Firestore:", data.settings)
+            // Load settings from Firestore - ensure strings are properly converted
+            setStartBalance(data.settings.startBalance != null ? String(data.settings.startBalance) : "")
+            setEndBalance(data.settings.endBalance != null ? String(data.settings.endBalance) : "")
+            setColourTheme(data.settings.colourTheme || "blue")
+            setSelectedFont(data.settings.selectedFont || "Arial")
+            setFontSize(data.settings.fontSize || 24)
+            setCornerRadius(data.settings.cornerRadius || "20px")
+            return
+          }
+        }
+      } catch (error) {
+        console.error("Error loading user settings:", error)
+      }
+      // No localStorage fallback - each user should have their own settings in Firestore
+    }
+
+    loadUserSettings()
+
+    // Check if user is admin and get username
     const session = localStorage.getItem("huntmaster_session")
     if (session) {
       try {
         const sessionData = JSON.parse(decrypt(session))
-        setIsAdmin(sessionData.isAdmin) // Change from username === "admin" to check isAdmin property
+        setIsAdmin(sessionData.isAdmin)
+        setCurrentUsername(sessionData.username)
       } catch (err) {
         console.error("Error checking admin status:", err)
         setIsAdmin(false)
@@ -159,16 +197,86 @@ export function BonusHuntTracker() {
     }
   }, [])
 
+  // Save slots to Firestore whenever they change (but not on initial load)
   useEffect(() => {
-    // Save data to localStorage
-    localStorage.setItem("slotList", JSON.stringify(slots))
-    localStorage.setItem("startBalance", startBalance)
-    localStorage.setItem("endBalance", endBalance)
-    localStorage.setItem("colourTheme", colourTheme)
-    localStorage.setItem("selectedFont", selectedFont)
-    localStorage.setItem("fontSize", fontSize.toString())
-    localStorage.setItem("cornerRadius", cornerRadius)
-  }, [slots, startBalance, endBalance, colourTheme, selectedFont, fontSize, cornerRadius])
+    if (!initialLoadComplete) {
+      return // Don't save during initial load
+    }
+
+    const saveSlotsToFirestore = async () => {
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session && slots.length >= 0) {
+          const response = await fetch("/api/slots", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "save", slots }),
+          })
+          const data = await response.json()
+          // Update slots with Firestore IDs only if we have temporary IDs
+          // This prevents infinite loops from setSlots triggering the useEffect
+          if (data.success && data.slots) {
+            // Check if we need to update (i.e., if any slot has a temporary Date.now() ID)
+            const hasTempIds = slots.some(slot => slot.id.length > 20) // Firestore IDs are shorter
+            if (hasTempIds) {
+              setSlots(data.slots.map((slot: any) => ({
+                id: slot.id,
+                name: slot.name,
+                bet: slot.bet,
+                win: slot.win,
+              })))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error saving slots to Firestore:", error)
+      }
+    }
+
+    saveSlotsToFirestore()
+  }, [slots, initialLoadComplete])
+
+  // Save settings to Firestore and localStorage
+  useEffect(() => {
+    if (!initialLoadComplete) {
+      return // Don't save during initial load
+    }
+
+    // Save to Firestore
+    const saveSettingsToFirestore = async () => {
+      const settingsToSave = {
+        startBalance,
+        endBalance,
+        colourTheme,
+        selectedFont,
+        fontSize,
+        cornerRadius,
+      }
+      console.log("Saving settings to Firestore:", settingsToSave)
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session) {
+          await fetch("/api/user-settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              session,
+              action: "save",
+              settings: settingsToSave,
+            }),
+          })
+        }
+      } catch (error) {
+        console.error("Error saving settings to Firestore:", error)
+      }
+    }
+
+    saveSettingsToFirestore()
+  }, [startBalance, endBalance, colourTheme, selectedFont, fontSize, cornerRadius, initialLoadComplete])
 
   const handleAddSlot = (e: React.FormEvent) => {
     e.preventDefault()
@@ -208,11 +316,29 @@ export function BonusHuntTracker() {
     setIsDeleteDialogOpen(true)
   }
 
-  const handleDeleteSlot = () => {
+  const handleDeleteSlot = async () => {
     if (editingSlot) {
-      setSlots(slots.filter((slot) => slot.id !== editingSlot.id))
+      // Remove slot from local state
+      const updatedSlots = slots.filter((slot) => slot.id !== editingSlot.id)
+      setSlots(updatedSlots)
       setIsDeleteDialogOpen(false)
       setEditingSlot(null)
+      
+      // Explicitly save to Firestore to ensure deletion persists
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session) {
+          await fetch("/api/slots", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "save", slots: updatedSlots }),
+          })
+        }
+      } catch (error) {
+        console.error("Error saving after delete:", error)
+      }
     }
   }
 
@@ -340,7 +466,42 @@ ${slotListInfo}`
     setIsNewHuntDialogOpen(true)
   }
 
-  const confirmNewHunt = () => {
+  const confirmNewHunt = async () => {
+    // Clear slots from Firestore for this user
+    try {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        await fetch("/api/slots", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ session, action: "save", slots: [] }),
+        })
+        // Clear settings in Firestore
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: {
+              startBalance: "",
+              endBalance: "",
+              colourTheme,
+              selectedFont,
+              fontSize,
+              cornerRadius,
+            },
+          }),
+        })
+      }
+    } catch (error) {
+      console.error("Error clearing hunt data:", error)
+    }
+    
     setSlots([])
     setStartBalance("")
     setEndBalance("")
@@ -577,7 +738,7 @@ ${slotListInfo}`
                           <Button
                             onClick={() =>
                               copyToClipboard(
-                                `http://huntmaster.vercel.app/obs-${index + 2}?size=${obsSizes[obsKey]}${isObs5 ? `&radius=${cornerRadius}` : ""}`,
+                                `http://huntmaster.vercel.app/obs-${index + 2}?size=${obsSizes[obsKey]}${isObs5 ? `&radius=${cornerRadius}` : ""}&user=${currentUsername}`,
                                 `${obs} link copied to clipboard`,
                               )
                             }
@@ -612,7 +773,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            `http://huntmaster.vercel.app/obs-7?size=${obsSizes.obs5}&radius=${cornerRadius}`,
+                            `http://huntmaster.vercel.app/obs-7?size=${obsSizes.obs5}&radius=${cornerRadius}&user=${currentUsername}`,
                             `OBS 7 link copied to clipboard`,
                           )
                         }
@@ -641,7 +802,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            `http://huntmaster.vercel.app/obs-8?size=${obsSizes.obs5}`,
+                            `http://huntmaster.vercel.app/obs-8?size=${obsSizes.obs5}&user=${currentUsername}`,
                             `OBS 8 link copied to clipboard`,
                           )
                         }
@@ -675,7 +836,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/progress-bar",
+                            `http://huntmaster.vercel.app/widgets/progress-bar?user=${currentUsername}`,
                             "Progress Bar link copied to clipboard",
                           )
                         }
@@ -701,7 +862,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/top-wins",
+                            `http://huntmaster.vercel.app/widgets/top-wins?user=${currentUsername}`,
                             "Top Wins link copied to clipboard",
                           )
                         }
@@ -727,7 +888,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/hunt-stats",
+                            `http://huntmaster.vercel.app/widgets/hunt-stats?user=${currentUsername}`,
                             "Hunt Stats link copied to clipboard",
                           )
                         }
@@ -753,7 +914,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/next-bonus",
+                            `http://huntmaster.vercel.app/widgets/next-bonus?user=${currentUsername}`,
                             "Next Bonus link copied to clipboard",
                           )
                         }
@@ -779,7 +940,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/start-balance",
+                            `http://huntmaster.vercel.app/widgets/start-balance?user=${currentUsername}`,
                             "Start Balance link copied to clipboard",
                           )
                         }
@@ -805,7 +966,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/time-date",
+                            `http://huntmaster.vercel.app/widgets/time-date?user=${currentUsername}`,
                             "Time & Date widget link copied to clipboard",
                           )
                         }
@@ -836,7 +997,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/time-date-advanced?theme=neon",
+                            `http://huntmaster.vercel.app/widgets/time-date-advanced?theme=neon&user=${currentUsername}`,
                             "Advanced Time & Date widget link copied to clipboard",
                           )
                         }
@@ -862,7 +1023,7 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            "http://huntmaster.vercel.app/widgets/ars",
+                            `http://huntmaster.vercel.app/widgets/ars?user=${currentUsername}`,
                             "ARS Converter widget link copied to clipboard",
                           )
                         }
@@ -917,7 +1078,7 @@ ${slotListInfo}`
                 <Button className="w-full">Collect Bonuses</Button>
               </Link>
               {isAdmin && (
-                <Link href="/admin/manage">
+                <Link href="/admin">
                   <Button className="w-full">Admin Dashboard</Button>
                 </Link>
               )}

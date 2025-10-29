@@ -8,15 +8,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { decrypt, encrypt } from "@/lib/protection"
+import { decrypt } from "@/lib/protection"
 import { XCircle, Edit, Trash2 } from "lucide-react"
 
 interface User {
-  id: number
+  id: string | number
   username: string
-  password: string
+  password?: string
   is_admin: boolean
+  isAdmin?: boolean // Support both formats
 }
+
+// Helper to get admin status from either field
+const getIsAdmin = (user: User) => user.isAdmin !== undefined ? user.isAdmin : user.is_admin
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([])
@@ -28,6 +32,10 @@ export default function AdminDashboard() {
   const [editedUsername, setEditedUsername] = useState("")
   const [editedPassword, setEditedPassword] = useState("")
   const [editedIsAdmin, setEditedIsAdmin] = useState(false)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [newUsername, setNewUsername] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [newIsAdmin, setNewIsAdmin] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -40,7 +48,7 @@ export default function AdminDashboard() {
 
     try {
       const sessionData = JSON.parse(decrypt(session))
-      if (sessionData.username !== "admin") {
+      if (!sessionData.isAdmin) {
         router.push("/dashboard")
         return
       }
@@ -73,13 +81,48 @@ export default function AdminDashboard() {
     setEditingUser(user)
     setEditedUsername(user.username)
     setEditedPassword("")
-    setEditedIsAdmin(user.is_admin)
+    setEditedIsAdmin(getIsAdmin(user))
     setIsEditDialogOpen(true)
   }
 
   const handleDelete = (user: User) => {
     setEditingUser(user)
     setIsDeleteDialogOpen(true)
+  }
+
+  const handleAddUser = async () => {
+    if (!newUsername || !newPassword) {
+      setError("Username and password are required")
+      return
+    }
+
+    try {
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: newUsername,
+          password: newPassword,
+          isAdmin: newIsAdmin,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setNewUsername("")
+        setNewPassword("")
+        setNewIsAdmin(false)
+        setIsAddDialogOpen(false)
+        fetchUsers()
+      } else {
+        setError(data.error || "Failed to create user")
+      }
+    } catch (err) {
+      setError("Failed to create user")
+    }
   }
 
   const handleUpdateUser = async () => {
@@ -93,7 +136,7 @@ export default function AdminDashboard() {
         },
         body: JSON.stringify({
           username: editedUsername,
-          password: editedPassword ? encrypt(editedPassword) : undefined,
+          password: editedPassword || undefined,
           is_admin: editedIsAdmin,
         }),
       })
@@ -138,6 +181,7 @@ export default function AdminDashboard() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-2xl">Manage Users</CardTitle>
           <div className="flex gap-2">
+            <Button onClick={() => setIsAddDialogOpen(true)}>Add New User</Button>
             <Button variant="outline" onClick={() => router.push("/admin/test-new-admin")}>
               Test New Admin
             </Button>
@@ -167,7 +211,7 @@ export default function AdminDashboard() {
               {users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>{user.username}</TableCell>
-                  <TableCell>{user.is_admin ? "Yes" : "No"}</TableCell>
+                  <TableCell>{getIsAdmin(user) ? "Yes" : "No"}</TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
                       <Button
@@ -226,7 +270,7 @@ export default function AdminDashboard() {
             <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
-                checked={editedIsAdmin}
+                checked={editedIsAdmin || false}
                 onChange={(e) => setEditedIsAdmin(e.target.checked)}
                 id="is-admin"
                 className="rounded border-gray-300"
@@ -256,6 +300,49 @@ export default function AdminDashboard() {
             <Button variant="destructive" onClick={handleDeleteUser}>
               Delete
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label>Username</label>
+              <Input
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="Username"
+              />
+            </div>
+            <div className="space-y-2">
+              <label>Password</label>
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Password"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={newIsAdmin || false}
+                onChange={(e) => setNewIsAdmin(e.target.checked)}
+                id="new-is-admin"
+                className="rounded border-gray-300"
+              />
+              <label htmlFor="new-is-admin">Admin User</label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddUser}>Create User</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

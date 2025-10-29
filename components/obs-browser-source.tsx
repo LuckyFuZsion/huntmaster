@@ -18,17 +18,61 @@ export default function OBSBrowserSource() {
   const [colourTheme, setColourTheme] = useState("blue")
   const [selectedFont, setSelectedFont] = useState("Arial")
   const [fontSize, setFontSize] = useState(24)
+  const [mounted, setMounted] = useState(false)
 
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
+  const username = searchParams.get("user") // Get username from URL parameter
 
   useEffect(() => {
-    // Load data from localStorage
-    const loadData = () => {
-      const storedSlots = localStorage.getItem("slotList")
-      if (storedSlots) {
-        setSlots(JSON.parse(storedSlots))
+    setMounted(true)
+    
+    const loadSlotsFromFirestore = async () => {
+      try {
+        // If username is provided in URL, load that user's slots
+        if (username) {
+          const response = await fetch(`/api/slots/by-username?username=${username}`)
+          const data = await response.json()
+          if (data.success && data.slots) {
+            setSlots(data.slots.map((slot: any) => ({
+              id: slot.id,
+              name: slot.name,
+              bet: slot.bet,
+              win: slot.win,
+            })))
+          }
+        } else {
+          // Fallback to session-based loading
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/slots", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ session, action: "get" }),
+            })
+            const data = await response.json()
+            if (data.success && data.slots) {
+              setSlots(data.slots.map((slot: any) => ({
+                id: slot.id,
+                name: slot.name,
+                bet: slot.bet,
+                win: slot.win,
+              })))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading slots:", error)
       }
+    }
+    
+    // Load data from Firestore
+    const loadData = async () => {
+      await loadSlotsFromFirestore()
+      
+      // Load other settings from localStorage
       const storedStartBalance = localStorage.getItem("startBalance")
       if (storedStartBalance) {
         setStartBalance(Number.parseFloat(storedStartBalance))
@@ -57,7 +101,7 @@ export default function OBSBrowserSource() {
     const interval = setInterval(loadData, 2000) // Check every 2 seconds
 
     return () => clearInterval(interval)
-  }, [])
+  }, [username])
 
   const totalBet = slots.reduce((sum, slot) => sum + Number.parseFloat(slot.bet.toString()), 0)
   const totalWinAmount = slots.reduce((sum, slot) => sum + (slot.win !== null ? Number(slot.win) : 0), 0)
@@ -109,9 +153,13 @@ export default function OBSBrowserSource() {
     return str.replace(/\b\w/g, (char) => char.toUpperCase()).replace(/'S\b/g, "'s") // Fix apostrophe + S at the end of words
   }
 
+  if (!mounted) {
+    return null
+  }
+
   return (
     <>
-      <style>
+      <style suppressHydrationWarning>
         {scrollKeyframes}
         {`.scrolling-table > div {
           display: flex;
@@ -130,6 +178,7 @@ export default function OBSBrowserSource() {
           display: "flex",
           flexDirection: "column",
         }}
+        suppressHydrationWarning
       >
         <img
           src="https://i.ibb.co/vXBPN63/Huntmaster.png"

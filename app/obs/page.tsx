@@ -3,7 +3,7 @@ import OBSBrowserSource from "@/components/obs-browser-source"
 
 export default function OBSPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<div>Loading...</div>}>
       <OBSBrowserSource />
     </Suspense>
   )

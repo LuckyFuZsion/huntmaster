@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { sql } from "@vercel/postgres"
-import { encrypt } from "@/lib/protection"
+import { firestoreAdmin } from "@/lib/firestore-admin"
+import bcrypt from "bcryptjs"
 
 export const runtime = "edge"
 
@@ -8,32 +8,33 @@ export async function POST(request: Request) {
   try {
     const { username, password, isAdmin = false } = await request.json()
 
-    // Check if user exists
-    const existingUser = await sql`
-      SELECT id FROM users WHERE username = ${username}
-    `
+    // Check if user exists in Firestore
+    const existingUser = await firestoreAdmin.users.findByUsername(username)
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
       return NextResponse.json({
         success: false,
         error: "Username already exists",
       })
     }
 
-    // Create new user
-    const encryptedPassword = encrypt(password)
-    const result = await sql`
-      INSERT INTO users (username, password, is_admin)
-      VALUES (${username}, ${encryptedPassword}, ${isAdmin})
-      RETURNING id, username, is_admin
-    `
+    // Hash password with bcrypt
+    const hashedPassword = await bcrypt.hash(password, 10)
+
+    // Create new user in Firestore
+    const newUser = await firestoreAdmin.users.create({
+      username,
+      password: hashedPassword,
+      isAdmin,
+      createdAt: new Date(),
+    })
 
     return NextResponse.json({
       success: true,
       user: {
-        id: result.rows[0].id,
-        username: result.rows[0].username,
-        isAdmin: result.rows[0].is_admin,
+        id: newUser.id,
+        username: newUser.username,
+        isAdmin: newUser.isAdmin,
       },
     })
   } catch (error) {

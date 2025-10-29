@@ -1,22 +1,21 @@
-import { sql } from "@vercel/postgres"
 import { NextResponse } from "next/server"
+import { initializeApp } from "firebase/app"
+import { getFirestore } from "firebase/firestore"
 
+// With Firestore, we don't need to create tables - collections are created automatically
+// This route is kept for backwards compatibility but does nothing for Firestore
 export async function POST() {
   try {
-    // Create User table
-    await sql`
-      CREATE TABLE IF NOT EXISTS "users" (
-        "id" SERIAL PRIMARY KEY,
-        "username" VARCHAR(255) UNIQUE NOT NULL,
-        "password" VARCHAR(255) NOT NULL,
-        "is_admin" BOOLEAN DEFAULT FALSE,
-        "created_at" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `
-
-    return NextResponse.json({ success: true, message: "Tables created successfully" })
+    // Firestore collections are created automatically when first data is added
+    // No need to create tables like in SQL databases
+    console.log("Firestore: Collections will be created automatically on first write")
+    
+    return NextResponse.json({ 
+      success: true, 
+      message: "Firestore ready - collections will be created automatically"
+    })
   } catch (error) {
-    console.error("Error creating tables:", error)
+    console.error("Error initializing Firestore:", error)
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred"
     return NextResponse.json({ success: false, error: errorMessage })
   }

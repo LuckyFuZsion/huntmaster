@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
+import { useSearchParams } from "next/navigation"
 
 interface Slot {
   id: string
@@ -16,16 +17,48 @@ export default function StartBalanceWidget() {
   const [slots, setSlots] = useState<Slot[]>([])
   const [currentStatIndex, setCurrentStatIndex] = useState(0)
   const [isLoaded, setIsLoaded] = useState(false)
+  const searchParams = useSearchParams()
+  const username = searchParams.get("user")
 
   useEffect(() => {
-    const loadData = () => {
-      const storedStartBalance = localStorage.getItem("startBalance")
-      const storedEndBalance = localStorage.getItem("endBalance")
-      const storedSlots = localStorage.getItem("slotList")
-
-      if (storedStartBalance) setStartBalance(storedStartBalance)
-      if (storedEndBalance) setEndBalance(storedEndBalance)
-      if (storedSlots) setSlots(JSON.parse(storedSlots))
+    const loadSlotsFromFirestore = async () => {
+      try {
+        if (username) {
+          const response = await fetch(`/api/slots/by-username?username=${username}`)
+          const data = await response.json()
+          if (data.success && data.slots) {
+            setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
+          }
+        } else {
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/slots", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
+            const data = await response.json()
+            if (data.success && data.slots) {
+              setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading slots:", error)
+      }
+    }
+    
+    const loadData = async () => {
+      await loadSlotsFromFirestore()
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
+          const data = await response.json()
+          if (data.success && data.settings) {
+            setStartBalance(data.settings.startBalance || "0")
+            setEndBalance(data.settings.endBalance || "0")
+          }
+        } catch (error) {
+          console.error("Error loading user settings:", error)
+        }
+      }
 
       if (!isLoaded) setIsLoaded(true)
     }
@@ -42,7 +75,7 @@ export default function StartBalanceWidget() {
       clearInterval(dataInterval)
       clearInterval(rotationInterval)
     }
-  }, [isLoaded])
+  }, [username, isLoaded])
 
   const calculateStats = () => {
     const usedBalance = Number(startBalance) - Number(endBalance)

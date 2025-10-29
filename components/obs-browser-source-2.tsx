@@ -18,6 +18,7 @@ const capitalizeWords = (str: string) => {
 export default function OBSBrowserSource2() {
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
+  const username = searchParams.get("user")
 
   const [slots, setSlots] = useState<Slot[]>([])
   const [startBalance, setStartBalance] = useState(0)
@@ -27,12 +28,35 @@ export default function OBSBrowserSource2() {
   const [fontSize, setFontSize] = useState(24)
 
   useEffect(() => {
-    const loadData = () => {
-      const storedSlots = localStorage.getItem("slotList")
-      if (storedSlots) {
-        const parsedSlots = JSON.parse(storedSlots)
-        setSlots(parsedSlots)
+    const loadSlotsFromFirestore = async () => {
+      try {
+        const session = localStorage.getItem("huntmaster_session")
+        if (session) {
+          const response = await fetch("/api/slots", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "get" }),
+          })
+          const data = await response.json()
+          if (data.success && data.slots) {
+            setSlots(data.slots.map((slot: any) => ({
+              id: slot.id,
+              name: slot.name,
+              bet: slot.bet,
+              win: slot.win,
+            })))
+          }
+        }
+      } catch (error) {
+        console.error("Error loading slots:", error)
       }
+    }
+    
+    const loadData = async () => {
+      await loadSlotsFromFirestore()
+      
       const storedStartBalance = localStorage.getItem("startBalance")
       if (storedStartBalance) {
         setStartBalance(Number.parseFloat(storedStartBalance))
@@ -58,7 +82,7 @@ export default function OBSBrowserSource2() {
     loadData()
     const interval = setInterval(loadData, 2000)
     return () => clearInterval(interval)
-  }, [])
+  }, [username])
 
   const totalWinAmount = slots.reduce((sum, slot) => sum + (slot.win !== null ? Number(slot.win) : 0), 0)
   const totalBetAmount = slots.reduce((sum, slot) => sum + slot.bet, 0)

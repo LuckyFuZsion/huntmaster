@@ -1,6 +1,6 @@
-import { sql } from "@vercel/postgres"
 import { NextResponse } from "next/server"
-import { encrypt } from "@/lib/protection"
+import { firestoreAdmin } from "@/lib/firestore-admin"
+import bcrypt from "bcryptjs"
 
 export async function PUT(request: Request) {
   try {
@@ -20,24 +20,19 @@ export async function PUT(request: Request) {
 
     const { username, password, is_admin } = await request.json()
 
-    // If password is provided, update it; otherwise, keep the existing password
-    if (password) {
-      const encryptedPassword = encrypt(password)
-      await sql`
-        UPDATE users
-        SET username = ${username},
-            password = ${encryptedPassword},
-            is_admin = ${is_admin}
-        WHERE id = ${id};
-      `
-    } else {
-      await sql`
-        UPDATE users
-        SET username = ${username},
-            is_admin = ${is_admin}
-        WHERE id = ${id};
-      `
+    // Build update data
+    const updateData: any = {
+      username,
+      isAdmin: is_admin,
     }
+
+    // If password is provided, hash and update it
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10)
+      updateData.password = hashedPassword
+    }
+
+    await firestoreAdmin.users.update(id, updateData)
 
     return NextResponse.json({
       success: true,
@@ -72,11 +67,9 @@ export async function DELETE(request: Request) {
     }
 
     // Check if user is admin
-    const userCheck = await sql`
-      SELECT username FROM users WHERE id = ${id};
-    `
+    const user = await firestoreAdmin.users.findOne(id)
 
-    if (userCheck.rows[0]?.username === "admin") {
+    if (user?.username === "admin" || user?.username === process.env.ADMIN_USERNAME) {
       return NextResponse.json(
         {
           success: false,
@@ -86,10 +79,7 @@ export async function DELETE(request: Request) {
       )
     }
 
-    await sql`
-      DELETE FROM users
-      WHERE id = ${id};
-    `
+    await firestoreAdmin.users.delete(id)
 
     return NextResponse.json({
       success: true,

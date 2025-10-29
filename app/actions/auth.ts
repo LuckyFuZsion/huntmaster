@@ -3,6 +3,8 @@
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { encrypt } from "@/lib/protection"
+import { firestoreAdmin } from "@/lib/firestore-admin"
+import bcrypt from "bcryptjs"
 
 export async function login(formData: FormData) {
   const username = formData.get("username") as string
@@ -22,14 +24,78 @@ export async function login(formData: FormData) {
     attemptedPasswordLength: trimmedPassword.length,
   })
 
-  // Check credentials against environment variables
+  try {
+    // Try to find user in Firestore
+    const user = await firestoreAdmin.users.findByUsername(trimmedUsername)
+
+    if (!user) {
+      console.log("No user found in Firestore, checking environment variables")
+      // Fallback to environment variables for backwards compatibility
+      return await legacyLogin(trimmedUsername, trimmedPassword)
+    }
+
+    // Verify password
+    if (!user.password) {
+      return { error: "Invalid credentials" }
+    }
+
+    const isValidPassword = await bcrypt.compare(trimmedPassword, user.password)
+
+    if (!isValidPassword) {
+      return { error: "Invalid credentials" }
+    }
+
+    console.log("Login successful for:", user.username)
+
+    // Create session
+    const session = {
+      username: user.username,
+      userId: user.id,
+      isAdmin: user.isAdmin,
+      timestamp: Date.now(),
+    }
+
+    return {
+      success: true,
+      session: encrypt(JSON.stringify(session)),
+    }
+  } catch (error) {
+    console.error("Login error:", error)
+    // Fallback to environment variables
+    return await legacyLogin(trimmedUsername, trimmedPassword)
+  }
+}
+
+// Legacy login function using environment variables
+async function legacyLogin(username: string, password: string) {
+  // First, try to find the user in Firestore
+  try {
+    const firestoreUser = await firestoreAdmin.users.findByUsername(username)
+    if (firestoreUser) {
+      // User exists in Firestore, use their Firestore ID
+      const session = {
+        username: firestoreUser.username,
+        userId: firestoreUser.id, // Use Firestore document ID
+        isAdmin: firestoreUser.isAdmin,
+        timestamp: Date.now(),
+      }
+      return {
+        success: true,
+        session: encrypt(JSON.stringify(session)),
+      }
+    }
+  } catch (error) {
+    console.error("Error finding user in Firestore:", error)
+  }
+
+  // If not found in Firestore, use legacy environment variables with a temporary ID
   const validUsers = [
     // Admin user
     {
       username: process.env.ADMIN_USERNAME?.trim(),
       password: process.env.ADMIN_PASSWORD?.trim(),
       isAdmin: true,
-      userId: 999,
+      userId: `legacy_${process.env.ADMIN_USERNAME?.trim()}`,
     },
     // Generate array of 10 regular users
     ...Array.from({ length: 10 }, (_, i) => {
@@ -38,48 +104,21 @@ export async function login(formData: FormData) {
         username: process.env[`USER${userNumber}_USERNAME`]?.trim(),
         password: process.env[`USER${userNumber}_PASSWORD`]?.trim(),
         isAdmin: false,
-        userId: userNumber,
+        userId: `legacy_${process.env[`USER${userNumber}_USERNAME`]?.trim()}`,
       }
     }),
-  ].filter((user) => user.username && user.password) // Only include users with both username and password set
-
-  console.log("Valid users found:", validUsers.length)
-  console.log("User environment variables status:", {
-    ADMIN: !!process.env.ADMIN_USERNAME,
-    ...Object.fromEntries(
-      Array.from({ length: 10 }, (_, i) => [
-        `USER${i + 1}`,
-        !!process.env[`USER${i + 1}_USERNAME`] && !!process.env[`USER${i + 1}_PASSWORD`],
-      ]),
-    ),
-  })
+  ].filter((user) => user.username && user.password)
 
   const user = validUsers.find((u) => {
-    const usernameMatch = u.username === trimmedUsername
-    const passwordMatch = u.password === trimmedPassword
-
-    console.log("Checking credentials for:", u.username, {
-      usernameMatch,
-      passwordMatch,
-      storedUsernameLength: u.username?.length,
-      storedPasswordLength: u.password?.length,
-      attemptedUsernameLength: trimmedUsername.length,
-      attemptedPasswordLength: trimmedPassword.length,
-      storedFirstChar: u.username ? u.username.charCodeAt(0) : null,
-      attemptedFirstChar: trimmedUsername.charCodeAt(0),
-    })
-
+    const usernameMatch = u.username === username
+    const passwordMatch = u.password === password
     return usernameMatch && passwordMatch
   })
 
   if (!user) {
-    console.log("No matching user found")
     return { error: "Invalid credentials" }
   }
 
-  console.log("Login successful for:", user.username)
-
-  // Create session
   const session = {
     username: user.username,
     userId: user.userId,
