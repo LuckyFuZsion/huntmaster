@@ -165,7 +165,9 @@ export async function GET(request: NextRequest) {
 
     // Check if user is active - admins are always considered active
     // For new users, isActive will be false - they need admin approval
-    const isUserActive = user.isAdmin || user.isActive === true
+    // Legacy users (without isActive field set) are treated as active for backwards compatibility
+    // Only users with explicit isActive === false are inactive
+    const isUserActive = user.isAdmin || user.isActive !== false
 
     if (!isUserActive) {
       // User is inactive - create a session with inactive flag but don't allow access

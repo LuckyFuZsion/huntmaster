@@ -46,8 +46,9 @@ export async function login(formData: FormData) {
     }
 
     // Check if user is active - admins are always considered active
-    // Only users with explicit isActive === true are active (new users default to false)
-    const isUserActive = user.isAdmin || user.isActive === true
+    // Legacy users (without isActive field) are treated as active for backwards compatibility
+    // Only users with explicit isActive === false are inactive
+    const isUserActive = user.isAdmin || user.isActive !== false
 
     if (!isUserActive) {
       // User is inactive - return inactive flag
