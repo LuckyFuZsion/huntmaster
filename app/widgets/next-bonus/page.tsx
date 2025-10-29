@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
 interface Slot {
@@ -10,7 +10,7 @@ interface Slot {
   win: number | null
 }
 
-export default function NextBonusWidget() {
+function NextBonusWidgetContent() {
   const [slots, setSlots] = useState<Slot[]>([])
 
   const searchParams = useSearchParams()
@@ -77,5 +77,32 @@ export default function NextBonusWidget() {
         <div style={{ fontSize: "18px", color: "#8BB8E8" }}>All bonuses opened!</div>
       )}
     </div>
+  )
+}
+
+export default function NextBonusWidget() {
+  return (
+    <Suspense fallback={
+      <div
+        style={{
+          width: "300px",
+          height: "100px",
+          background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+          borderRadius: "10px",
+          padding: "15px",
+          fontFamily: "'Segoe UI', Arial, sans-serif",
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ fontSize: "20px", fontWeight: "bold", marginBottom: "10px" }}>Next Bonus</div>
+        <div style={{ fontSize: "18px", color: "#8BB8E8" }}>Loading...</div>
+      </div>
+    }>
+      <NextBonusWidgetContent />
+    </Suspense>
   )
 }

@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
-export default function BonusHuntProgressBar() {
+function BonusHuntProgressBarContent() {
   const [slots, setSlots] = useState<any[]>([])
   const searchParams = useSearchParams()
   const username = searchParams.get("user")
@@ -101,5 +101,33 @@ export default function BonusHuntProgressBar() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function BonusHuntProgressBar() {
+  return (
+    <Suspense fallback={
+      <div
+        style={{
+          width: "400px",
+          height: "100px",
+          background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+          borderRadius: "10px",
+          padding: "10px",
+          fontFamily: "'Segoe UI', Arial, sans-serif",
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "10px", textAlign: "center" }}>
+          Bonus Hunt Progress
+        </div>
+        <div style={{ textAlign: "center", color: "#8BB8E8" }}>Loading...</div>
+      </div>
+    }>
+      <BonusHuntProgressBarContent />
+    </Suspense>
   )
 }

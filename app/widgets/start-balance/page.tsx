@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import Image from "next/image"
 import { useSearchParams } from "next/navigation"
 
@@ -11,7 +11,7 @@ interface Slot {
   win: number | null
 }
 
-export default function StartBalanceWidget() {
+function StartBalanceWidgetContent() {
   const [startBalance, setStartBalance] = useState("0")
   const [endBalance, setEndBalance] = useState("0")
   const [slots, setSlots] = useState<Slot[]>([])
@@ -241,5 +241,19 @@ export default function StartBalanceWidget() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function StartBalanceWidget() {
+  return (
+    <Suspense fallback={
+      <div className="relative w-[300px] h-[120px] rounded-[24px] overflow-hidden" style={{ background: "linear-gradient(135deg, #2D1B4C 0%, #6B1B4C 100%)", boxShadow: "0 8px 32px 0 rgba(31, 38, 135, 0.37)" }}>
+        <div className="relative h-full flex flex-col items-center justify-center p-4">
+          <div className="text-white/80 text-xl mb-1 font-medium tracking-wide text-center">Loading...</div>
+        </div>
+      </div>
+    }>
+      <StartBalanceWidgetContent />
+    </Suspense>
   )
 }

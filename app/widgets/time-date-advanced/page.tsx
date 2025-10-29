@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
-export default function AdvancedTimeDateWidget() {
+function AdvancedTimeDateWidgetContent() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const searchParams = useSearchParams()
 
@@ -190,5 +190,21 @@ export default function AdvancedTimeDateWidget() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function AdvancedTimeDateWidget() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-screen">
+        <div className="relative p-6 overflow-hidden">
+          <div className="relative z-10 text-center">
+            <div className="text-7xl font-bold text-white tracking-tight">Loading...</div>
+          </div>
+        </div>
+      </div>
+    }>
+      <AdvancedTimeDateWidgetContent />
+    </Suspense>
   )
 }

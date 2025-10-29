@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
-export default function TimeDateWidget() {
+function TimeDateWidgetContent() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const searchParams = useSearchParams()
   const format = searchParams.get("format") || "12" // 12 or 24 hour format
@@ -101,5 +101,21 @@ export default function TimeDateWidget() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function TimeDateWidget() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-screen">
+        <div className="relative p-6 overflow-hidden">
+          <div className="relative z-10 text-center">
+            <div className="text-7xl font-bold text-white tracking-tight">Loading...</div>
+          </div>
+        </div>
+      </div>
+    }>
+      <TimeDateWidgetContent />
+    </Suspense>
   )
 }

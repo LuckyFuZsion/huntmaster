@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
 interface Slot {
@@ -10,7 +10,7 @@ interface Slot {
   win: number | null
 }
 
-export default function TopWinsLeaderboard() {
+function TopWinsLeaderboardContent() {
   const [slots, setSlots] = useState<Slot[]>([])
   const searchParams = useSearchParams()
   const username = searchParams.get("user")
@@ -88,5 +88,27 @@ export default function TopWinsLeaderboard() {
         </tbody>
       </table>
     </div>
+  )
+}
+
+export default function TopWinsLeaderboard() {
+  return (
+    <Suspense fallback={
+      <div
+        style={{
+          width: "300px",
+          background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+          borderRadius: "10px",
+          padding: "15px",
+          fontFamily: "'Segoe UI', Arial, sans-serif",
+          color: "#fff",
+        }}
+      >
+        <div style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "15px", textAlign: "center" }}>Top 5 Wins</div>
+        <div style={{ textAlign: "center", color: "#8BB8E8" }}>Loading...</div>
+      </div>
+    }>
+      <TopWinsLeaderboardContent />
+    </Suspense>
   )
 }
