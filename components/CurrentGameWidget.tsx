@@ -24,6 +24,7 @@ export default function CurrentGameWidget({ title: titleProp, provider, username
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [overallBests, setOverallBests] = useState<{ bestWinAmount: number | null; bestXWin: number | null; bestWinGame?: string; bestXWinGame?: string; } | null>(null);
+  const [imageError, setImageError] = useState(false);
 
   // Auto-load next slot title if username provided and no explicit title
   useEffect(() => {
@@ -77,6 +78,10 @@ export default function CurrentGameWidget({ title: titleProp, provider, username
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
           const preferred = data.data.find((it: any) => it.maxWin && String(it.maxWin).trim() !== "") || data.data[0];
           setGame(preferred);
+          setImageError(false); // Reset image error when loading new game
+          if (preferred?.thumbnail) {
+            console.log("Loading thumbnail:", preferred.thumbnail);
+          }
         } else {
           // Fallback: try legacy single-source search
           const params = new URLSearchParams();
@@ -88,8 +93,10 @@ export default function CurrentGameWidget({ title: titleProp, provider, username
           if (!cancelled && legacyJson.success && Array.isArray(legacyJson.data) && legacyJson.data.length > 0) {
             const preferredLegacy = legacyJson.data.find((it: any) => it.maxWin && String(it.maxWin).trim() !== "") || legacyJson.data[0];
             setGame(preferredLegacy);
+            setImageError(false); // Reset image error when loading new game
           } else {
             setGame(null);
+            setImageError(false);
           }
         }
       } catch (e: any) {
@@ -133,11 +140,21 @@ export default function CurrentGameWidget({ title: titleProp, provider, username
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <div style={{ width: size, height: size, borderRadius: 6, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        {game?.thumbnail ? (
+        {game?.thumbnail && !imageError ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={game.thumbnail} alt={game.title} width={size} height={size} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+          <img 
+            src={game.thumbnail} 
+            alt={game.title} 
+            width={size} 
+            height={size} 
+            style={{ objectFit: "cover", width: "100%", height: "100%" }}
+            onError={() => setImageError(true)}
+            onLoad={() => setImageError(false)}
+          />
         ) : (
-          <span style={{ color: "#999", fontSize: Math.max(10, size * 0.07) }}>{loading ? "Loading..." : "No image"}</span>
+          <span style={{ color: "#999", fontSize: Math.max(10, size * 0.07) }}>
+            {loading ? "Loading..." : game?.thumbnail ? "Image failed" : "No image"}
+          </span>
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
