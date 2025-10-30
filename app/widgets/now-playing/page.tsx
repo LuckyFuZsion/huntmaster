@@ -1,9 +1,10 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import CurrentGameWidget from "@/components/CurrentGameWidget";
 
-export default function NowPlayingWidgetPage() {
+function NowPlayingWidgetContent() {
   const params = useSearchParams();
   const username = params.get("user") || undefined;
 
@@ -12,5 +13,13 @@ export default function NowPlayingWidgetPage() {
     <div style={{ padding: 8, background: "transparent" }}>
       <CurrentGameWidget username={username} />
     </div>
+  );
+}
+
+export default function NowPlayingWidgetPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 8, background: "transparent" }}>Loading...</div>}>
+      <NowPlayingWidgetContent />
+    </Suspense>
   );
 }
