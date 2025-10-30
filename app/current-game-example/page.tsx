@@ -1,9 +1,10 @@
 "use client";
 
+import { Suspense } from "react";
 import CurrentGameWidget from "@/components/CurrentGameWidget";
 import { useSearchParams } from "next/navigation";
 
-export default function CurrentGameExamplePage() {
+function CurrentGameExampleContent() {
   const params = useSearchParams();
   const title = params.get("title") || "Gates of Olympus";
   const provider = params.get("provider") || "Pragmatic Play";
@@ -16,5 +17,13 @@ export default function CurrentGameExamplePage() {
         Try query params like <code>?title=Sugar%20Rush&provider=Pragmatic%20Play</code>
       </div>
     </div>
+  );
+}
+
+export default function CurrentGameExamplePage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading...</div>}>
+      <CurrentGameExampleContent />
+    </Suspense>
   );
 }
