@@ -12,12 +12,34 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "title or provider is required" }, { status: 400 });
     }
 
-    const response = await searchGameReviews({
-      search: title || undefined,
-      developer: provider,
-      limit,
-      include_ratings: false,
-    });
+    // Check if API key is configured
+    if (!process.env.SLOT_STREAMERS_API_KEY) {
+      console.error("SLOT_STREAMERS_API_KEY is not configured");
+      return NextResponse.json({ success: false, error: "API not configured" }, { status: 500 });
+    }
+
+    let response;
+    try {
+      response = await searchGameReviews({
+        search: title || undefined,
+        developer: provider,
+        limit,
+        include_ratings: false,
+      });
+    } catch (apiError: any) {
+      console.error("Error calling searchGameReviews:", apiError);
+      console.error("Error details:", {
+        message: apiError?.message,
+        stack: apiError?.stack,
+        title,
+        provider,
+      });
+      return NextResponse.json({ 
+        success: false, 
+        error: apiError?.message || "Failed to search game reviews",
+        details: process.env.NODE_ENV === "development" ? apiError?.message : undefined
+      }, { status: 500 });
+    }
 
     // Prefer exact or best match by title and provider when provided
     const normalized = (s: string) => s.trim().toLowerCase();

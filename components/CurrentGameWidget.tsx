@@ -137,18 +137,32 @@ export default function CurrentGameWidget({ title: titleProp, provider, username
 
   if (!effectiveTitle) return null;
 
+  // Generate proxy URL for thumbnail if available
+  const thumbnailUrl = useMemo(() => {
+    if (!game?.thumbnail) return null;
+    try {
+      // Use proxy endpoint to bypass CORS
+      return `/api/image-proxy?url=${encodeURIComponent(game.thumbnail)}`;
+    } catch {
+      return null;
+    }
+  }, [game?.thumbnail]);
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <div style={{ width: size, height: size, borderRadius: 6, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        {game?.thumbnail && !imageError ? (
+        {thumbnailUrl && !imageError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img 
-            src={game.thumbnail} 
+            src={thumbnailUrl} 
             alt={game.title} 
             width={size} 
             height={size} 
             style={{ objectFit: "cover", width: "100%", height: "100%" }}
-            onError={() => setImageError(true)}
+            onError={() => {
+              console.error("Failed to load proxied image:", thumbnailUrl);
+              setImageError(true);
+            }}
             onLoad={() => setImageError(false)}
           />
         ) : (
