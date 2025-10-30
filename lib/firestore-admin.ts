@@ -50,6 +50,34 @@ export interface UserSettings {
   selectedFont: string
   fontSize: number
   cornerRadius: string
+  // Spider overlay customization settings
+  spiderColors?: {
+    headerStart: string
+    headerEnd: string
+    footerStart: string
+    footerEnd: string
+    tableEven: string
+    tableOdd: string
+    fontColor: string
+    borderColor: string
+  }
+  spiderTextColors?: {
+    headerText: string
+    statsLabels: string
+    statsValues: string
+    tableHeaders: string
+    tableContent: string
+    biggestWinLabel: string
+    biggestWinValue: string
+    biggestMultiLabel: string
+    biggestMultiValue: string
+    progressText: string
+  }
+  spiderFontFamily?: string
+  spiderBorderWidth?: number
+  spiderHeaderText?: string
+  spiderSize?: string
+  spiderRadius?: string
   updatedAt: Date | Timestamp
 }
 

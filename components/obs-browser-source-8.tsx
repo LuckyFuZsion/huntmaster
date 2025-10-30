@@ -17,21 +17,48 @@ const capitalizeWords = (str: string) => {
 export default function OBSBrowserSource8() {
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
+  const username = searchParams.get("user")
 
   const [slots, setSlots] = useState<Slot[]>([])
 
   useEffect(() => {
-    const loadData = () => {
-      const storedSlots = localStorage.getItem("slotList")
-      if (storedSlots) {
-        setSlots(JSON.parse(storedSlots))
+    const loadSlotsFromFirestore = async () => {
+      try {
+        if (username) {
+          const response = await fetch(`/api/slots/by-username?username=${username}`)
+          const data = await response.json()
+          if (data.success && data.slots) {
+            setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
+          }
+        } else {
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/slots", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ session, action: "get" }),
+            })
+            const data = await response.json()
+            if (data.success && data.slots) {
+              setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading slots:", error)
       }
+    }
+
+    const loadData = async () => {
+      await loadSlotsFromFirestore()
     }
 
     loadData()
     const interval = setInterval(loadData, 2000)
     return () => clearInterval(interval)
-  }, [])
+  }, [username])
 
   return (
     <div

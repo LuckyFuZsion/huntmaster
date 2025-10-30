@@ -52,21 +52,36 @@ export default function OBSBrowserSource5() {
       }
     }
     
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
-      const session = localStorage.getItem("huntmaster_session")
-      if (session) {
-        try {
-          const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
+    const loadUserSettings = async () => {
+      try {
+        if (username) {
+          // Load settings by username (for OBS browser sources)
+          const response = await fetch(`/api/user-settings/by-username?username=${username}`)
           const data = await response.json()
           if (data.success && data.settings) {
             setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
             setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
           }
-        } catch (error) {
-          console.error("Error loading user settings:", error)
+        } else {
+          // Fallback to session-based loading
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
+            const data = await response.json()
+            if (data.success && data.settings) {
+              setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
+              setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
+            }
+          }
         }
+      } catch (error) {
+        console.error("Error loading user settings:", error)
       }
+    }
+
+    const loadData = async () => {
+      await loadSlotsFromFirestore()
+      await loadUserSettings()
     }
 
     loadData()

@@ -219,19 +219,20 @@ function CollectBonusesContent() {
           },
           body: JSON.stringify({ session, action: "update-single", slot: slotToSave }),
         })
-        if (!response.ok) {
-          console.error("API error:", response.status)
-          throw new Error(`API error: ${response.status}`)
-        }
         
         const data = await response.json()
-        if (data.success) {
-          // Mark this slot as saved (permanently, until it's changed)
-          console.log("Slot updated successfully:", id, slotToSave.name)
-          setSavedSlots(prev => new Set(prev).add(id))
-          
-          // Don't remove it from savedSlots - it stays green until the user changes it
+        
+        if (!response.ok || !data.success) {
+          const errorMessage = data.error || `API error: ${response.status}`
+          console.error("API error:", response.status, errorMessage, data)
+          throw new Error(errorMessage)
         }
+        
+        // Mark this slot as saved (permanently, until it's changed)
+        console.log("Slot updated successfully:", id, slotToSave.name)
+        setSavedSlots(prev => new Set(prev).add(id))
+        
+        // Don't remove it from savedSlots - it stays green until the user changes it
       }
     } catch (error) {
       console.error("Error saving slots:", error)

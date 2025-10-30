@@ -30,15 +30,9 @@ export default function OBSBrowserSource2() {
   useEffect(() => {
     const loadSlotsFromFirestore = async () => {
       try {
-        const session = localStorage.getItem("huntmaster_session")
-        if (session) {
-          const response = await fetch("/api/slots", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ session, action: "get" }),
-          })
+        // If username is provided in URL, load that user's slots
+        if (username) {
+          const response = await fetch(`/api/slots/by-username?username=${username}`)
           const data = await response.json()
           if (data.success && data.slots) {
             setSlots(data.slots.map((slot: any) => ({
@@ -48,35 +42,91 @@ export default function OBSBrowserSource2() {
               win: slot.win,
             })))
           }
+        } else {
+          // Fallback to session-based loading
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/slots", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ session, action: "get" }),
+            })
+            const data = await response.json()
+            if (data.success && data.slots) {
+              setSlots(data.slots.map((slot: any) => ({
+                id: slot.id,
+                name: slot.name,
+                bet: slot.bet,
+                win: slot.win,
+              })))
+            }
+          }
         }
       } catch (error) {
         console.error("Error loading slots:", error)
       }
     }
+
+    const loadUserSettings = async () => {
+      try {
+        if (username) {
+          // Load settings by username (for OBS browser sources)
+          const response = await fetch(`/api/user-settings/by-username?username=${username}`)
+          const data = await response.json()
+          if (data.success && data.settings) {
+            setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
+            setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
+            if (data.settings.colourTheme) setColourTheme(data.settings.colourTheme)
+            if (data.settings.selectedFont) setSelectedFont(data.settings.selectedFont)
+            if (data.settings.fontSize) setFontSize(Number.parseInt(data.settings.fontSize))
+          }
+        } else {
+          // Fallback to session-based loading
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
+            const data = await response.json()
+            if (data.success && data.settings) {
+              setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
+              setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
+              if (data.settings.colourTheme) setColourTheme(data.settings.colourTheme)
+              if (data.settings.selectedFont) setSelectedFont(data.settings.selectedFont)
+              if (data.settings.fontSize) setFontSize(Number.parseInt(data.settings.fontSize))
+            }
+          } else {
+            // Ultimate fallback to localStorage
+            const storedStartBalance = localStorage.getItem("startBalance")
+            if (storedStartBalance) {
+              setStartBalance(Number.parseFloat(storedStartBalance))
+            }
+            const storedEndBalance = localStorage.getItem("endBalance")
+            if (storedEndBalance) {
+              setEndBalance(Number.parseFloat(storedEndBalance))
+            }
+            const storedColourTheme = localStorage.getItem("colourTheme")
+            if (storedColourTheme) {
+              setColourTheme(storedColourTheme)
+            }
+            const storedFont = localStorage.getItem("selectedFont")
+            if (storedFont) {
+              setSelectedFont(storedFont)
+            }
+            const storedFontSize = localStorage.getItem("fontSize")
+            if (storedFontSize) {
+              setFontSize(Number.parseInt(storedFontSize))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading user settings:", error)
+      }
+    }
     
     const loadData = async () => {
       await loadSlotsFromFirestore()
-      
-      const storedStartBalance = localStorage.getItem("startBalance")
-      if (storedStartBalance) {
-        setStartBalance(Number.parseFloat(storedStartBalance))
-      }
-      const storedEndBalance = localStorage.getItem("endBalance")
-      if (storedEndBalance) {
-        setEndBalance(Number.parseFloat(storedEndBalance))
-      }
-      const storedColourTheme = localStorage.getItem("colourTheme")
-      if (storedColourTheme) {
-        setColourTheme(storedColourTheme)
-      }
-      const storedFont = localStorage.getItem("selectedFont")
-      if (storedFont) {
-        setSelectedFont(storedFont)
-      }
-      const storedFontSize = localStorage.getItem("fontSize")
-      if (storedFontSize) {
-        setFontSize(Number.parseInt(storedFontSize))
-      }
+      await loadUserSettings()
     }
 
     loadData()

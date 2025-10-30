@@ -19,7 +19,7 @@ const capitalizeWords = (str: string) => {
 
 // Default values
 const defaultHeaderText = "🕷️ 🎰 BONUS HUNT"
-const defaultFooterText = "Huntmaster - Created by LuckyFuZsion for abigwetspider"
+const defaultFooterText = "Huntmaster - Created by LuckyFuZsion"
 
 // Default text colors
 const defaultTextColors = {
@@ -38,6 +38,7 @@ const defaultTextColors = {
 export default function SpiderBrowserSource() {
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
+  const username = searchParams.get("user")
 
   const [slots, setSlots] = useState<Slot[]>([])
   const [startBalance, setStartBalance] = useState(0)
@@ -62,65 +63,118 @@ export default function SpiderBrowserSource() {
   // Footer text is fixed and cannot be changed
   const footerText = defaultFooterText
 
-  // Function to load all settings from localStorage
-  const loadSettings = useCallback(() => {
-    // Load colors
+  // Function to load slots and balance from Firestore or localStorage
+  const loadSlotsAndBalance = useCallback(async () => {
+    try {
+      if (username) {
+        // Load slots by username (for OBS browser sources)
+        const slotsResponse = await fetch(`/api/slots/by-username?username=${username}`)
+        const slotsData = await slotsResponse.json()
+        if (slotsData.success && slotsData.slots) {
+          setSlots(slotsData.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
+        }
+
+        // Load user settings by username
+        const settingsResponse = await fetch(`/api/user-settings/by-username?username=${username}`)
+        const settingsData = await settingsResponse.json()
+        if (settingsData.success && settingsData.settings) {
+          setStartBalance(Number.parseFloat(settingsData.settings.startBalance) || 0)
+          setEndBalance(Number.parseFloat(settingsData.settings.endBalance) || 0)
+        }
+      } else {
+        // Fallback to localStorage
+        const storedSlots = localStorage.getItem("slotList")
+        if (storedSlots) {
+          setSlots(JSON.parse(storedSlots))
+        }
+
+        const storedStartBalance = localStorage.getItem("startBalance")
+        if (storedStartBalance) {
+          setStartBalance(Number.parseFloat(storedStartBalance))
+        }
+
+        const storedEndBalance = localStorage.getItem("endBalance")
+        if (storedEndBalance) {
+          setEndBalance(Number.parseFloat(storedEndBalance))
+        }
+      }
+    } catch (error) {
+      console.error("Error loading slots and balance:", error)
+    }
+  }, [username])
+
+  // Function to load all settings from Firestore (per user) or localStorage (fallback)
+  const loadSettings = useCallback(async () => {
+    if (username) {
+      // Load from Firestore when user parameter is provided
+      try {
+        const settingsResponse = await fetch(`/api/user-settings/by-username?username=${username}`)
+        const settingsData = await settingsResponse.json()
+        if (settingsData.success && settingsData.settings) {
+          if (settingsData.settings.spiderColors) {
+            setColors(settingsData.settings.spiderColors)
+          }
+          if (settingsData.settings.spiderTextColors) {
+            setTextColors(settingsData.settings.spiderTextColors)
+          }
+          if (settingsData.settings.spiderFontFamily) {
+            setFontFamily(settingsData.settings.spiderFontFamily)
+          }
+          if (settingsData.settings.spiderBorderWidth !== undefined) {
+            setBorderWidth(settingsData.settings.spiderBorderWidth)
+          }
+          if (settingsData.settings.spiderHeaderText) {
+            setHeaderText(settingsData.settings.spiderHeaderText)
+          }
+          return // Exit early if Firestore data loaded
+        }
+      } catch (error) {
+        console.error("Error loading spider settings from Firestore:", error)
+        // Fall through to localStorage fallback
+      }
+    }
+
+    // Fallback to localStorage for backwards compatibility
     const storedColors = localStorage.getItem("spiderColors")
     if (storedColors) {
       setColors(JSON.parse(storedColors))
     }
 
-    // Load text colors
     const storedTextColors = localStorage.getItem("spiderTextColors")
     if (storedTextColors) {
       setTextColors(JSON.parse(storedTextColors))
     }
 
-    // Load font family
     const storedFontFamily = localStorage.getItem("spiderFontFamily")
     if (storedFontFamily) {
       setFontFamily(storedFontFamily)
     }
 
-    // Load border width
     const storedBorderWidth = localStorage.getItem("spiderBorderWidth")
     if (storedBorderWidth) {
       setBorderWidth(Number.parseInt(storedBorderWidth))
     }
 
-    // Load header text
     const storedHeaderText = localStorage.getItem("spiderHeaderText")
     if (storedHeaderText) {
       setHeaderText(storedHeaderText)
     }
-
-    // Load slot data
-    const storedSlots = localStorage.getItem("slotList")
-    if (storedSlots) {
-      setSlots(JSON.parse(storedSlots))
-    }
-
-    // Load balance data
-    const storedStartBalance = localStorage.getItem("startBalance")
-    if (storedStartBalance) {
-      setStartBalance(Number.parseFloat(storedStartBalance))
-    }
-
-    const storedEndBalance = localStorage.getItem("endBalance")
-    if (storedEndBalance) {
-      setEndBalance(Number.parseFloat(storedEndBalance))
-    }
-  }, [])
+  }, [username])
 
   // Initial load
   useEffect(() => {
     loadSettings()
+    loadSlotsAndBalance()
 
     // Set up interval to check for updates
-    const interval = setInterval(loadSettings, 1000) // Check every second for more responsive updates
+    const slotsInterval = setInterval(loadSlotsAndBalance, 2000) // Check every 2 seconds for slots/balance
+    const settingsInterval = setInterval(() => loadSettings(), 2000) // Check every 2 seconds for styling settings
 
-    return () => clearInterval(interval)
-  }, [loadSettings])
+    return () => {
+      clearInterval(slotsInterval)
+      clearInterval(settingsInterval)
+    }
+  }, [loadSettings, loadSlotsAndBalance])
 
   // Set up stats rotation
   useEffect(() => {

@@ -48,13 +48,31 @@ export async function POST(request: Request) {
       
       console.log("Updating single slot:", singleSlot.id, singleSlot.name, "Win:", singleSlot.win)
       
-      await firestoreAdmin.slots.update(singleSlot.id, {
-        name: singleSlot.name,
-        bet: singleSlot.bet,
-        win: singleSlot.win,
-      })
-      
-      return NextResponse.json({ success: true, slot: singleSlot })
+      try {
+        await firestoreAdmin.slots.update(singleSlot.id, {
+          name: singleSlot.name,
+          bet: singleSlot.bet,
+          win: singleSlot.win,
+        })
+        
+        console.log("Successfully updated slot:", singleSlot.id)
+        return NextResponse.json({ success: true, slot: singleSlot })
+      } catch (updateError: any) {
+        console.error("Error updating slot:", updateError)
+        // If the slot doesn't exist, try creating it instead
+        if (updateError.code === "not-found" || updateError.code === 5) {
+          console.log("Slot not found, creating new slot instead")
+          const newSlot = await firestoreAdmin.slots.create({
+            name: singleSlot.name,
+            bet: singleSlot.bet,
+            win: singleSlot.win,
+            userId,
+            createdAt: new Date(),
+          })
+          return NextResponse.json({ success: true, slot: { ...newSlot, id: newSlot.id } })
+        }
+        throw updateError // Re-throw if it's a different error
+      }
     } else if (action === "save") {
       // Save slots for the user (full save - deletes and recreates)
       console.log("Saving slots to Firestore, received:", slotData.length, "slots")
@@ -82,8 +100,18 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: false, error: "Invalid action" }, { status: 400 })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error with slots:", error)
-    return NextResponse.json({ success: false, error: "Failed to process slots" }, { status: 500 })
+    console.error("Error details:", {
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      action: error.action || "unknown"
+    })
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || "Failed to process slots",
+      details: process.env.NODE_ENV === "development" ? error.message : undefined
+    }, { status: 500 })
   }
 }

@@ -617,85 +617,13 @@ ${slotListInfo}`
                 {activeMenu === "slotList" ? "Hide Slotlist" : "View Slotlist"}
               </Button>
               <Button onClick={() => toggleMenu("customise")} className="w-full mt-2">
-                {activeMenu === "customise" ? "Hide Customise Menu" : "Customise OBS"}
+                {activeMenu === "customise" ? "Hide Customise Menu" : "Customise Overlay Sizes"}
               </Button>
               <Button onClick={() => toggleMenu("widgets")} className="w-full mt-2">
                 {activeMenu === "widgets" ? "Hide Widgets Menu" : "Show Widgets Menu"}
               </Button>
               {activeMenu === "customise" && (
                 <div className="space-y-4 mt-2">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-2">
-                      <label htmlFor="colour-theme" className="block text-xs font-medium text-gray-700">
-                        Theme
-                      </label>
-                      <Select value={colourTheme} onValueChange={handleColourThemeChange}>
-                        <SelectTrigger id="colour-theme" className="w-full text-xs">
-                          <SelectValue placeholder="Theme" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="blue">Blue</SelectItem>
-                          <SelectItem value="red">Red</SelectItem>
-                          <SelectItem value="green">Green</SelectItem>
-                          <SelectItem value="purple">Purple</SelectItem>
-                          <SelectItem value="orange">Orange</SelectItem>
-                          <SelectItem value="black">Black</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label htmlFor="font-select" className="block text-xs font-medium text-gray-700">
-                        Font
-                      </label>
-                      <Select value={selectedFont} onValueChange={handleFontChange}>
-                        <SelectTrigger id="font-select" className="w-full text-xs">
-                          <SelectValue placeholder="Font" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {fontOptions.map((font) => (
-                            <SelectItem key={font} value={font}>
-                              {font}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label htmlFor="font-size" className="block text-xs font-medium text-gray-700">
-                        Size
-                      </label>
-                      <div className="flex items-center space-x-1">
-                        <Button onClick={handleDecreaseFontSize} variant="outline" size="icon" className="h-8 w-8">
-                          <Minus className="h-3 w-3" />
-                        </Button>
-                        <span className="text-xs font-medium w-8 text-center">{fontSize}</span>
-                        <Button onClick={handleIncreaseFontSize} variant="outline" size="icon" className="h-8 w-8">
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label htmlFor="corner-radius" className="block text-xs font-medium text-gray-700">
-                      Corner Radius
-                    </label>
-                    <Select value={cornerRadius} onValueChange={handleRadiusChange}>
-                      <SelectTrigger id="corner-radius" className="w-full text-xs">
-                        <SelectValue placeholder="Radius" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0px">Square (0px)</SelectItem>
-                        <SelectItem value="10px">Slight (10px)</SelectItem>
-                        <SelectItem value="20px">Medium (20px)</SelectItem>
-                        <SelectItem value="30px">Rounded (30px)</SelectItem>
-                        <SelectItem value="40px">Very Rounded (40px)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <div className="grid grid-cols-2 gap-2">
                     {["obs", "obs2", "obs3", "obs4", "obs5"].map((source) => (
                       <div key={source} className="flex items-center space-x-2">
@@ -1069,6 +997,9 @@ ${slotListInfo}`
               </div>
             )}
             <div className="flex flex-col space-y-2">
+              <Link href="/spider-edit">
+                <Button className="w-full">Customisable Overlay</Button>
+              </Link>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1349,6 +1280,10 @@ ${slotListInfo}`
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
               <WidgetItem
+                url={`http://huntmaster.vercel.app/spider?user=${currentUsername}`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+              />
+              <WidgetItem
                 url={`http://huntmaster.vercel.app/widgets/progress-bar?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/progress-bar-widget.png-NDrWkJkNn45TPvyo7WZEQvoOcwT9qi.png"
               />
@@ -1384,6 +1319,13 @@ ${slotListInfo}`
             <p className="mt-4">
               <strong>Important:</strong> These URLs are personalized for your account ({currentUsername || "your username"}). 
               To use these in OBS Studio, add a Browser Source and paste the appropriate link. Each overlay and widget will display only your hunt data.
+            </p>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              <strong>Customization Note:</strong> The Spider overlay is highly customizable! Visit{" "}
+              <Link href="/spider-edit" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline dark:text-blue-400">
+                /spider-edit
+              </Link>{" "}
+              to customize colors, fonts, header text, border width, and more. Your customization settings will be saved to localStorage and applied to your Spider overlay.
             </p>
           </div>
           <DialogFooter>

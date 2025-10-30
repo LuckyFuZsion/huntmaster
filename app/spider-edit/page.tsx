@@ -7,11 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Copy, Check, Type, Palette } from "lucide-react"
+import { Copy, Check, Type, Palette, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { decrypt } from "@/lib/protection"
 
 interface ColorState {
   headerStart: string
@@ -85,7 +86,8 @@ const defaultTextColors: TextColorState = {
 const defaultFont = "Arial"
 const defaultBorderWidth = 1
 const defaultHeaderText = "🕷️ 🎰 BONUS HUNT"
-const defaultFooterText = "Huntmaster - Created by LuckyFuZsion for abigwetspider"
+const defaultFooterText = "Huntmaster - Created by LuckyFuZsion"
+const defaultSize = "600px"
 
 // Predefined color palette
 const colorPalette = [
@@ -147,6 +149,10 @@ const colorPalette = [
 ]
 
 export default function SpiderEdit() {
+  const [mounted, setMounted] = useState(false)
+  const [currentUsername, setCurrentUsername] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle")
   const [colors, setColors] = useState<ColorState>({ ...defaultColors })
   const [textColors, setTextColors] = useState<TextColorState>({ ...defaultTextColors })
   const [fontFamily, setFontFamily] = useState(defaultFont)
@@ -156,68 +162,278 @@ export default function SpiderEdit() {
   const [activeTab, setActiveTab] = useState("colors")
   const [borderWidth, setBorderWidth] = useState(defaultBorderWidth)
   const [headerText, setHeaderText] = useState(defaultHeaderText)
+  const [size, setSize] = useState(defaultSize)
   // Footer text is no longer editable, but we'll keep it in state for consistency
   const footerText = defaultFooterText
 
+  // Set mounted flag to prevent hydration mismatches
   useEffect(() => {
-    // Load colors from localStorage
-    const storedColors = localStorage.getItem("spiderColors")
-    if (storedColors) {
-      setColors(JSON.parse(storedColors))
-    }
-
-    // Load text colors from localStorage
-    const storedTextColors = localStorage.getItem("spiderTextColors")
-    if (storedTextColors) {
-      setTextColors(JSON.parse(storedTextColors))
-    }
-
-    // Load font family from localStorage
-    const storedFontFamily = localStorage.getItem("spiderFontFamily")
-    if (storedFontFamily) {
-      setFontFamily(storedFontFamily)
-    }
-
-    // Load border width from localStorage
-    const storedBorderWidth = localStorage.getItem("spiderBorderWidth")
-    if (storedBorderWidth) {
-      setBorderWidth(Number.parseInt(storedBorderWidth))
-    }
-
-    // Load header text from localStorage
-    const storedHeaderText = localStorage.getItem("spiderHeaderText")
-    if (storedHeaderText) {
-      setHeaderText(storedHeaderText)
-    }
-
-    // Always set footer text to default in localStorage
-    localStorage.setItem("spiderFooterText", defaultFooterText)
+    setMounted(true)
   }, [])
 
+  // Load settings from Firestore (per user) or localStorage (fallback)
   useEffect(() => {
-    // Save colors to localStorage whenever they change
-    localStorage.setItem("spiderColors", JSON.stringify(colors))
+    if (!mounted) return // Wait for client-side mount
+    
+    const loadSettings = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      
+      if (session) {
+        try {
+          // Try to load from Firestore
+          const response = await fetch("/api/user-settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ session, action: "get" }),
+          })
+          
+          const data = await response.json()
+          if (data.success && data.settings) {
+            // Load spider settings from Firestore
+            if (data.settings.spiderColors) {
+              setColors(data.settings.spiderColors)
+            }
+            if (data.settings.spiderTextColors) {
+              setTextColors(data.settings.spiderTextColors)
+            }
+            if (data.settings.spiderFontFamily) {
+              setFontFamily(data.settings.spiderFontFamily)
+            }
+            if (data.settings.spiderBorderWidth !== undefined) {
+              setBorderWidth(data.settings.spiderBorderWidth)
+            }
+            if (data.settings.spiderHeaderText) {
+              setHeaderText(data.settings.spiderHeaderText)
+            }
+            if (data.settings.spiderSize) {
+              setSize(data.settings.spiderSize)
+            }
+            
+            // Get username from session
+            try {
+              const sessionData = JSON.parse(decrypt(session))
+              if (sessionData.username) {
+                setCurrentUsername(sessionData.username)
+              }
+            } catch (e) {
+              console.error("Error parsing session:", e)
+            }
+            
+            return // Exit early if Firestore data loaded
+          }
+        } catch (error) {
+          console.error("Error loading settings from Firestore:", error)
+          // Fall through to localStorage fallback
+        }
+      }
+      
+      // Fallback to localStorage for backwards compatibility
+      const storedColors = localStorage.getItem("spiderColors")
+      if (storedColors) {
+        setColors(JSON.parse(storedColors))
+      }
+
+      const storedTextColors = localStorage.getItem("spiderTextColors")
+      if (storedTextColors) {
+        setTextColors(JSON.parse(storedTextColors))
+      }
+
+      const storedFontFamily = localStorage.getItem("spiderFontFamily")
+      if (storedFontFamily) {
+        setFontFamily(storedFontFamily)
+      }
+
+      const storedBorderWidth = localStorage.getItem("spiderBorderWidth")
+      if (storedBorderWidth) {
+        setBorderWidth(Number.parseInt(storedBorderWidth))
+      }
+
+      const storedHeaderText = localStorage.getItem("spiderHeaderText")
+      if (storedHeaderText) {
+        setHeaderText(storedHeaderText)
+      }
+
+      const storedSize = localStorage.getItem("spiderSize")
+      if (storedSize) {
+        setSize(storedSize)
+      }
+
+      localStorage.setItem("spiderFooterText", defaultFooterText)
+    }
+
+    loadSettings()
+  }, [mounted])
+
+  // Save settings to Firestore (per user) with debouncing to avoid too many API calls
+  useEffect(() => {
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderColors", JSON.stringify(colors))
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderColors: colors },
+          }),
+        })
+        localStorage.setItem("spiderColors", JSON.stringify(colors))
+      } catch (error) {
+        console.error("Error saving colors:", error)
+        localStorage.setItem("spiderColors", JSON.stringify(colors))
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
   }, [colors])
 
   useEffect(() => {
-    // Save text colors to localStorage whenever they change
-    localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderTextColors: textColors },
+          }),
+        })
+        localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+      } catch (error) {
+        console.error("Error saving text colors:", error)
+        localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
   }, [textColors])
 
   useEffect(() => {
-    // Save font family to localStorage whenever it changes
-    localStorage.setItem("spiderFontFamily", fontFamily)
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderFontFamily", fontFamily)
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderFontFamily: fontFamily },
+          }),
+        })
+        localStorage.setItem("spiderFontFamily", fontFamily)
+      } catch (error) {
+        console.error("Error saving font family:", error)
+        localStorage.setItem("spiderFontFamily", fontFamily)
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
   }, [fontFamily])
 
   useEffect(() => {
-    // Save border width to localStorage whenever it changes
-    localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderBorderWidth: borderWidth },
+          }),
+        })
+        localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+      } catch (error) {
+        console.error("Error saving border width:", error)
+        localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
   }, [borderWidth])
 
   useEffect(() => {
-    // Save header text to localStorage whenever it changes
-    localStorage.setItem("spiderHeaderText", headerText)
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderHeaderText", headerText)
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderHeaderText: headerText },
+          }),
+        })
+        localStorage.setItem("spiderHeaderText", headerText)
+      } catch (error) {
+        console.error("Error saving header text:", error)
+        localStorage.setItem("spiderHeaderText", headerText)
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
   }, [headerText])
+
+  useEffect(() => {
+    const saveToFirestore = async () => {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        localStorage.setItem("spiderSize", size)
+        return
+      }
+      
+      try {
+        await fetch("/api/user-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            action: "save",
+            settings: { spiderSize: size },
+          }),
+        })
+        localStorage.setItem("spiderSize", size)
+      } catch (error) {
+        console.error("Error saving size:", error)
+        localStorage.setItem("spiderSize", size)
+      }
+    }
+    const timeoutId = setTimeout(saveToFirestore, 500)
+    return () => clearTimeout(timeoutId)
+  }, [size])
 
   useEffect(() => {
     // Update hex input when active color changes
@@ -259,6 +475,7 @@ export default function SpiderEdit() {
     setFontFamily(defaultFont)
     setBorderWidth(defaultBorderWidth)
     setHeaderText(defaultHeaderText)
+    setSize(defaultSize)
     setHexInput(
       defaultColors[activeColor as keyof ColorState] || defaultTextColors[activeColor as keyof TextColorState],
     )
@@ -301,10 +518,71 @@ export default function SpiderEdit() {
     setHeaderText(e.target.value)
   }
 
-  const copyToClipboard = (color: string) => {
-    navigator.clipboard.writeText(color)
-    setCopied(color)
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(text)
     setTimeout(() => setCopied(null), 2000)
+  }
+
+  // Manual save all settings function (works alongside auto-save)
+  const saveAllSettings = async () => {
+    const session = localStorage.getItem("huntmaster_session")
+    if (!session) {
+      // Save to localStorage only if no session
+      localStorage.setItem("spiderColors", JSON.stringify(colors))
+      localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+      localStorage.setItem("spiderFontFamily", fontFamily)
+      localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+      localStorage.setItem("spiderHeaderText", headerText)
+      localStorage.setItem("spiderSize", size)
+      setSaveStatus("success")
+      setTimeout(() => setSaveStatus("idle"), 2000)
+      return
+    }
+
+    setSaving(true)
+    setSaveStatus("idle")
+
+    try {
+      const response = await fetch("/api/user-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session,
+          action: "save",
+          settings: {
+            spiderColors: colors,
+            spiderTextColors: textColors,
+            spiderFontFamily: fontFamily,
+            spiderBorderWidth: borderWidth,
+            spiderHeaderText: headerText,
+            spiderSize: size,
+          },
+        }),
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        // Also save to localStorage as backup
+        localStorage.setItem("spiderColors", JSON.stringify(colors))
+        localStorage.setItem("spiderTextColors", JSON.stringify(textColors))
+        localStorage.setItem("spiderFontFamily", fontFamily)
+        localStorage.setItem("spiderBorderWidth", borderWidth.toString())
+        localStorage.setItem("spiderHeaderText", headerText)
+        localStorage.setItem("spiderSize", size)
+        setSaveStatus("success")
+        setTimeout(() => setSaveStatus("idle"), 3000)
+      } else {
+        setSaveStatus("error")
+        setTimeout(() => setSaveStatus("idle"), 3000)
+      }
+    } catch (error) {
+      console.error("Error saving settings:", error)
+      setSaveStatus("error")
+      setTimeout(() => setSaveStatus("idle"), 3000)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const ColorPreview = ({ color }: { color: string }) => (
@@ -315,13 +593,99 @@ export default function SpiderEdit() {
     />
   )
 
+  // Prevent hydration mismatch by not rendering interactive content until mounted
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 flex items-center justify-center p-4">
+        <Card className="w-full max-w-2xl">
+          <CardHeader>
+            <CardTitle className="text-2xl">Spider Browser Source Editor</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="text-center py-8">Loading...</div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 flex items-center justify-center p-4">
       <Card className="w-full max-w-2xl">
         <CardHeader>
-          <CardTitle className="text-2xl">Spider Browser Source Editor</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-2xl">Spider Browser Source Editor</CardTitle>
+            <div className="flex items-center gap-2">
+              {currentUsername && (
+                <Button
+                  onClick={() => {
+                    const url = `${window.location.origin}/spider?user=${currentUsername}&size=${size}`
+                    copyToClipboard(url)
+                    setCopied("url")
+                  }}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  {copied === "url" ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-500" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      Copy Overlay URL
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button
+                onClick={saveAllSettings}
+                disabled={saving}
+                className={cn(
+                  "flex items-center gap-2",
+                  saveStatus === "success" && "bg-green-600 hover:bg-green-700",
+                  saveStatus === "error" && "bg-red-600 hover:bg-red-700"
+                )}
+              >
+                <Save className="h-4 w-4" />
+                {saving ? "Saving..." : saveStatus === "success" ? "Saved!" : saveStatus === "error" ? "Error" : "Save All Settings"}
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Overlay Preview */}
+          {/* Size Control */}
+          <div className="space-y-2">
+            <Label htmlFor="spider-size">Overlay Size</Label>
+            <Select value={size} onValueChange={setSize}>
+              <SelectTrigger id="spider-size">
+                <SelectValue placeholder="Select size" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="400px">400px</SelectItem>
+                <SelectItem value="600px">600px</SelectItem>
+                <SelectItem value="800px">800px</SelectItem>
+                <SelectItem value="1000px">1000px</SelectItem>
+                <SelectItem value="1200px">1200px</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {currentUsername && (
+            <div className="space-y-2">
+              <Label>Live Preview</Label>
+              <div className="border rounded-lg overflow-hidden bg-black" style={{ height: size }}>
+                <iframe
+                  src={`/spider?user=${currentUsername}&size=${size}`}
+                  className="w-full h-full"
+                  style={{ border: "none" }}
+                  title="Spider Overlay Preview"
+                />
+              </div>
+            </div>
+          )}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="colors" className="flex items-center gap-2">
