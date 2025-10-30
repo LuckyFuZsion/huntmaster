@@ -210,6 +210,7 @@ function CollectBonusesContent() {
         if (!slotToSave) return
         
         console.log("Updating single slot in Firestore:", slotToSave.name, "Win:", slotToSave.win)
+        console.log("Full slot data:", JSON.stringify(slotToSave))
         
         // Update just this one slot
         const response = await fetch("/api/slots", {
@@ -220,7 +221,20 @@ function CollectBonusesContent() {
           body: JSON.stringify({ session, action: "update-single", slot: slotToSave }),
         })
         
-        const data = await response.json()
+        console.log("Fetch completed, status:", response.status, "ok:", response.ok)
+        
+        let data
+        try {
+          const text = await response.text()
+          console.log("Response text:", text)
+          data = JSON.parse(text)
+        } catch (parseError) {
+          console.error("Failed to parse response:", parseError)
+          throw new Error("Invalid response from server")
+        }
+        
+        console.log("API Response status:", response.status, "data:", data)
+        console.log("Slot being saved:", { name: slotToSave.name, bet: slotToSave.bet, win: slotToSave.win })
         
         if (!response.ok || !data.success) {
           const errorMessage = data.error || `API error: ${response.status}`

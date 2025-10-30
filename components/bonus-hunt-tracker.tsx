@@ -24,6 +24,7 @@ import { decrypt } from "@/lib/protection"
 import { useRouter } from "next/navigation"
 // Add the import for VersionHistory
 import { VersionHistory } from "@/components/version-history"
+import SlotNameAutocomplete from "@/components/SlotNameAutocomplete"
 
 interface Slot {
   id: string
@@ -247,15 +248,18 @@ export function BonusHuntTracker() {
 
     // Save to Firestore
     const saveSettingsToFirestore = async () => {
-      // Explicitly preserve "0" as a string - don't convert to null or empty
-      // Use nullish coalescing to only convert null/undefined, not "0"
-      const settingsToSave = {
-        startBalance: startBalance ?? "",
-        endBalance: endBalance ?? "",  // Preserve "0" - only convert null/undefined to ""
+      // Build settings payload, only include balances when set to avoid overwriting with empty values
+      const settingsToSave: Record<string, any> = {
         colourTheme,
         selectedFont,
         fontSize,
         cornerRadius,
+      }
+      if (startBalance !== "" && startBalance !== null && startBalance !== undefined) {
+        settingsToSave.startBalance = startBalance
+      }
+      if (endBalance !== "" && endBalance !== null && endBalance !== undefined) {
+        settingsToSave.endBalance = endBalance
       }
       console.log("Saving settings to Firestore:", settingsToSave)
       try {
@@ -587,10 +591,13 @@ ${slotListInfo}`
               />
             </div>
             <form onSubmit={handleAddSlot} className="flex flex-col space-y-2">
-              <Input
-                placeholder="Slot Name"
+              <SlotNameAutocomplete
                 value={newSlot.name}
-                onChange={(e) => setNewSlot({ ...newSlot, name: e.target.value })}
+                onChange={(v) => setNewSlot({ ...newSlot, name: v })}
+                onSelect={(item) => {
+                  setNewSlot({ ...newSlot, name: item.title })
+                }}
+                placeholder="Slot Name"
               />
               <div className="flex space-x-2 items-center">
                 <Input
@@ -946,8 +953,8 @@ ${slotListInfo}`
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Link href="/widgets/ars" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">ARS Converter</Button>
+                            <Link href={`/widgets/now-playing?user=${currentUsername}`} target="_blank" rel="noopener noreferrer">
+                              <Button className="w-full">Now Playing</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -958,8 +965,8 @@ ${slotListInfo}`
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            `http://huntmaster.vercel.app/widgets/ars?user=${currentUsername}`,
-                            "ARS Converter widget link copied to clipboard",
+                            `http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}`,
+                            "Now Playing widget link copied to clipboard",
                           )
                         }
                         variant="ghost"
@@ -1228,16 +1235,6 @@ ${slotListInfo}`
                   <li className="ml-4">Example: /widgets/time-date-advanced?theme=neon&format=24&size=large</li>
                 </ul>
               </li>
-              <li>
-                <strong>ARS Currency Converter:</strong>
-                <ul className="list-disc ml-6 mt-2 space-y-1 text-sm text-muted-foreground">
-                  <li>The ARS widget automatically converts your start balance from USD to ARS (Argentine Peso)</li>
-                  <li>Uses a fixed exchange rate of 0.00094 (configurable in the code)</li>
-                  <li>Updates in real-time as you change your start balance</li>
-                  <li>Displays the converted amount with a $ prefix</li>
-                  <li>Example: $1000 USD = $0.94 ARS</li>
-                </ul>
-              </li>
               <li>Use the "Collect Bonuses" button to enter win amounts for each bonus round.</li>
               <li>Copy hunt details using the clipboard button at the bottom.</li>
             </ol>
@@ -1312,7 +1309,7 @@ ${slotListInfo}`
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
               <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/ars?user=${currentUsername}`}
+                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
             </div>

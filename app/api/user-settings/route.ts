@@ -20,7 +20,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, settings: userSettings })
     } else if (action === "save") {
       // Save user settings
-      await firestoreAdmin.userSettings.update(userId, settings)
+      // Guard against overwriting balances with empty strings during initial loads
+      const sanitized: Record<string, any> = { ...settings }
+      if (Object.prototype.hasOwnProperty.call(sanitized, "startBalance")) {
+        const v = sanitized.startBalance
+        if (v === "" || v === null || v === undefined) {
+          delete sanitized.startBalance
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(sanitized, "endBalance")) {
+        const v = sanitized.endBalance
+        if (v === "" || v === null || v === undefined) {
+          delete sanitized.endBalance
+        }
+      }
+
+      await firestoreAdmin.userSettings.update(userId, sanitized)
       return NextResponse.json({ success: true })
     }
 

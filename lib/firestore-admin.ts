@@ -81,6 +81,18 @@ export interface UserSettings {
   updatedAt: Date | Timestamp
 }
 
+export interface UserWin {
+  id: string
+  userId: string
+  gameTitle: string
+  gameSlug?: string
+  provider?: string
+  bet: number
+  winAmount: number
+  xWin: number
+  createdAt: Date | Timestamp
+}
+
 // Firestore database operations using Admin SDK
 export const firestoreAdmin = {
   // User operations
@@ -341,6 +353,62 @@ export const firestoreAdmin = {
           updatedAt: admin.firestore.Timestamp.now(),
         })
       }
+    },
+  },
+
+  // User win operations
+  userWins: {
+    async create(win: Omit<UserWin, "id" | "createdAt">): Promise<UserWin> {
+      const docRef = await adminDb.collection("userWins").add({
+        ...win,
+        createdAt: admin.firestore.Timestamp.now(),
+      })
+      return { id: docRef.id, ...win, createdAt: new Date() }
+    },
+    async findBestByUserAndGame(userId: string, gameTitleOrSlug: string): Promise<{ bestWinAmount: number | null; bestXWin: number | null; }>{
+      const q = await adminDb.collection("userWins")
+        .where("userId", "==", userId)
+        .where("gameTitle", "==", gameTitleOrSlug)
+        .get()
+      if (q.empty) return { bestWinAmount: null, bestXWin: null }
+      let bestWinAmount: number | null = null
+      let bestXWin: number | null = null
+      q.forEach((doc) => {
+        const d = doc.data() as any
+        if (typeof d.winAmount === "number") {
+          bestWinAmount = bestWinAmount == null ? d.winAmount : Math.max(bestWinAmount, d.winAmount)
+        }
+        if (typeof d.xWin === "number") {
+          bestXWin = bestXWin == null ? d.xWin : Math.max(bestXWin, d.xWin)
+        }
+      })
+      return { bestWinAmount, bestXWin }
+    },
+    async findOverallBestByUser(userId: string): Promise<{ bestWinAmount: number | null; bestXWin: number | null; bestWinGame?: string; bestXWinGame?: string; }> {
+      const q = await adminDb.collection("userWins")
+        .where("userId", "==", userId)
+        .get()
+      if (q.empty) return { bestWinAmount: null, bestXWin: null }
+      let bestWinAmount: number | null = null
+      let bestXWin: number | null = null
+      let bestWinGame: string | undefined
+      let bestXWinGame: string | undefined
+      q.forEach((doc) => {
+        const d = doc.data() as any
+        if (typeof d.winAmount === "number") {
+          if (bestWinAmount == null || d.winAmount > bestWinAmount) {
+            bestWinAmount = d.winAmount
+            bestWinGame = d.gameTitle
+          }
+        }
+        if (typeof d.xWin === "number") {
+          if (bestXWin == null || d.xWin > bestXWin) {
+            bestXWin = d.xWin
+            bestXWinGame = d.gameTitle
+          }
+        }
+      })
+      return { bestWinAmount, bestXWin, bestWinGame, bestXWinGame }
     },
   },
 }

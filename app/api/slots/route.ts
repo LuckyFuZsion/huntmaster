@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { firestoreAdmin } from "@/lib/firestore-admin"
+import { adminDb } from "@/lib/firebase-admin"
 import { decrypt } from "@/lib/protection"
 
 // Handle both get and save operations via POST
@@ -49,11 +50,52 @@ export async function POST(request: Request) {
       console.log("Updating single slot:", singleSlot.id, singleSlot.name, "Win:", singleSlot.win)
       
       try {
+        // Get the existing slot to compare win values
+        const existingSlot = await adminDb.collection("slots").doc(singleSlot.id).get()
+        const prevWin = existingSlot.exists ? (existingSlot.data()?.win ?? null) : null
+        
         await firestoreAdmin.slots.update(singleSlot.id, {
           name: singleSlot.name,
           bet: singleSlot.bet,
           win: singleSlot.win,
         })
+        
+        // Record win whenever a valid win amount is saved
+        const newWin = typeof singleSlot.win === "number" ? singleSlot.win : null
+        console.log("Win recording check - prevWin:", prevWin, "newWin:", newWin, "userId:", userId)
+        
+        // Always record when there's a win amount (even if unchanged) to track all wins
+        if (newWin !== null && newWin >= 0) {
+          const bet = Number(singleSlot.bet) || 0
+          const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
+          console.log("Attempting to record win - gameTitle:", singleSlot.name, "bet:", bet, "winAmount:", newWin, "xWin:", xWin)
+          try {
+            const winRecord: any = {
+              userId,
+              gameTitle: String(singleSlot.name).trim(),
+              bet: bet,
+              winAmount: Number(newWin),
+              xWin,
+            }
+            // Only include optional fields if they have values (Firestore doesn't allow undefined)
+            // gameSlug and provider can be added later if needed
+            console.log("Creating userWin with data:", JSON.stringify(winRecord))
+            const created = await firestoreAdmin.userWins.create(winRecord)
+            console.log("✅ Successfully recorded user win. ID:", created.id, "Game:", singleSlot.name, "Win:", newWin, "X:", xWin)
+          } catch (e: any) {
+            console.error("❌ Failed to record user win:", e)
+            console.error("Error details:", {
+              message: e?.message,
+              code: e?.code,
+              stack: e?.stack,
+              userId,
+              gameTitle: singleSlot.name,
+              winAmount: newWin
+            })
+          }
+        } else {
+          console.log("Skipping win record - no valid win amount. newWin:", newWin)
+        }
         
         console.log("Successfully updated slot:", singleSlot.id)
         return NextResponse.json({ success: true, slot: singleSlot })
@@ -69,6 +111,26 @@ export async function POST(request: Request) {
             userId,
             createdAt: new Date(),
           })
+          
+          // Record win if creating a new slot with a win
+          const newWin = typeof singleSlot.win === "number" ? singleSlot.win : null
+          if (newWin !== null && newWin >= 0) {
+            const bet = Number(singleSlot.bet) || 0
+            const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
+            try {
+              await firestoreAdmin.userWins.create({
+                userId,
+                gameTitle: String(singleSlot.name).trim(),
+                bet: bet,
+                winAmount: Number(newWin),
+                xWin,
+              })
+              console.log("Recorded user win for new slot:", singleSlot.name, "Win:", newWin, "X:", xWin)
+            } catch (e) {
+              console.error("Failed to record user win for new slot:", e)
+            }
+          }
+          
           return NextResponse.json({ success: true, slot: { ...newSlot, id: newSlot.id } })
         }
         throw updateError // Re-throw if it's a different error
@@ -76,11 +138,19 @@ export async function POST(request: Request) {
     } else if (action === "save") {
       // Save slots for the user (full save - deletes and recreates)
       console.log("Saving slots to Firestore, received:", slotData.length, "slots")
-      
+
+      // Load existing to detect newly entered wins
+      const previousSlots = await firestoreAdmin.slots.findByUserId(userId)
+      const prevByKey = new Map<string, any>()
+      for (const s of previousSlots) {
+        const k = `${s.name}`.trim().toLowerCase() + `|${Number(s.bet)}`
+        if (!prevByKey.has(k)) prevByKey.set(k, s)
+      }
+
       // Delete all existing slots for this user
       await firestoreAdmin.slots.deleteAllByUserId(userId)
 
-      // Create new slots
+      // Create new slots and record wins that are new or improved
       const createdSlots = []
       for (const slot of slotData) {
         const newSlot = await firestoreAdmin.slots.create({
@@ -91,6 +161,26 @@ export async function POST(request: Request) {
           createdAt: new Date(),
         })
         createdSlots.push(newSlot)
+
+        const key = `${slot.name}`.trim().toLowerCase() + `|${Number(slot.bet)}`
+        const prev = prevByKey.get(key)
+        const prevWin = prev?.win ?? null
+        const newWin = typeof slot.win === "number" ? slot.win : null
+        if (newWin !== null && newWin >= 0 && (prevWin === null || newWin !== prevWin)) {
+          const bet = Number(slot.bet) || 0
+          const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
+          try {
+            await firestoreAdmin.userWins.create({
+              userId,
+              gameTitle: String(slot.name).trim(),
+              bet: bet,
+              winAmount: Number(newWin),
+              xWin,
+            })
+          } catch (e) {
+            console.error("Failed to record user win:", e)
+          }
+        }
       }
       
       console.log("Saved slots to Firestore, created:", createdSlots.length, "slots")
