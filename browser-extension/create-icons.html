@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Create Extension Icons</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    canvas {
+      border: 1px solid #333;
+      margin: 10px;
+      background: #252525;
+    }
+    .canvas-group {
+      display: inline-block;
+      margin: 20px;
+      text-align: center;
+    }
+    button {
+      background: #4a9eff;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin: 5px;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #3a8eef;
+    }
+    .instructions {
+      background: #252525;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>HuntMaster Extension Icon Generator</h1>
+    
+    <div class="instructions">
+      <p><strong>Instructions:</strong></p>
+      <ol>
+        <li>Click "Generate Icons" to create placeholder icons</li>
+        <li>Right-click each canvas and select "Save image as..."</li>
+        <li>Save as icon16.png, icon48.png, and icon128.png respectively</li>
+        <li>Place them in the browser-extension folder</li>
+      </ol>
+      <p><strong>Tip:</strong> For better icons, create your own 16x16, 48x48, and 128x128 pixel images with the HuntMaster logo or game controller icon.</p>
+    </div>
+
+    <button onclick="generateIcons()">Generate Icons</button>
+    <button onclick="downloadAll()">Download All</button>
+
+    <div class="canvas-group">
+      <canvas id="icon16" width="16" height="16"></canvas>
+      <div>16x16</div>
+    </div>
+    <div class="canvas-group">
+      <canvas id="icon48" width="48" height="48"></canvas>
+      <div>48x48</div>
+    </div>
+    <div class="canvas-group">
+      <canvas id="icon128" width="128" height="128"></canvas>
+      <div>128x128</div>
+    </div>
+  </div>
+
+  <script>
+    function drawIcon(canvas, size) {
+      const ctx = canvas.getContext('2d');
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, size, size);
+      
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#4a9eff');
+      gradient.addColorStop(1, '#2a7edf');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      
+      // Draw game controller icon (simplified)
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${size * 0.6}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🎮', size / 2, size / 2);
+      
+      // Alternative: Draw a simple "H" for HuntMaster
+      // ctx.font = `bold ${size * 0.7}px Arial`;
+      // ctx.fillText('H', size / 2, size / 2);
+    }
+
+    function generateIcons() {
+      drawIcon(document.getElementById('icon16'), 16);
+      drawIcon(document.getElementById('icon48'), 48);
+      drawIcon(document.getElementById('icon128'), 128);
+    }
+
+    function downloadCanvas(canvas, filename) {
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    function downloadAll() {
+      downloadCanvas(document.getElementById('icon16'), 'icon16.png');
+      setTimeout(() => downloadCanvas(document.getElementById('icon48'), 'icon48.png'), 100);
+      setTimeout(() => downloadCanvas(document.getElementById('icon128'), 'icon128.png'), 200);
+    }
+
+    // Generate on load
+    window.onload = generateIcons;
+  </script>
+</body>
+</html>
+
+
+
+

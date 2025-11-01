@@ -10,10 +10,17 @@ export async function GET(request: NextRequest) {
     console.log("Redirect route hit: /api/auth/callback/discord")
     // Preserve the query parameters (especially the 'code' parameter)
     const searchParams = request.nextUrl.searchParams.toString()
-    const redirectUrl = `/api/auth/discord/callback${searchParams ? `?${searchParams}` : ""}`
     
-    console.log("Redirecting to:", redirectUrl)
-    return NextResponse.redirect(new URL(redirectUrl, request.url))
+    // Get the base URL from the request
+    const host = request.headers.get("host") || ""
+    const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0")
+    const protocol = isLocalhost ? "http" : "https"
+    const baseUrl = `${protocol}://${host}`
+    
+    const redirectUrl = `${baseUrl}/api/auth/discord/callback${searchParams ? `?${searchParams}` : ""}`
+    
+    console.log("Redirecting to:", redirectUrl, "Base URL:", baseUrl, "Host:", host)
+    return NextResponse.redirect(redirectUrl)
   } catch (error) {
     console.error("Redirect route error:", error)
     return NextResponse.json(

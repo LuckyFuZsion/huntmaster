@@ -5,6 +5,8 @@ import type React from "react"
 import { useState, useEffect, useCallback } from "react"
 import { Trophy, Zap, Sparkles, Flame, Skull, DollarSign } from "lucide-react"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
 
 interface Slot {
   id: string
@@ -40,7 +42,6 @@ export default function SpiderBrowserSource() {
   const size = searchParams.get("size") || "600px"
   const username = searchParams.get("user")
 
-  const [slots, setSlots] = useState<Slot[]>([])
   const [startBalance, setStartBalance] = useState(0)
   const [endBalance, setEndBalance] = useState(0)
   const [currentStats, setCurrentStats] = useState(0)
@@ -63,118 +64,96 @@ export default function SpiderBrowserSource() {
   // Footer text is fixed and cannot be changed
   const footerText = defaultFooterText
 
-  // Function to load slots and balance from Firestore or localStorage
-  const loadSlotsAndBalance = useCallback(async () => {
-    try {
-      if (username) {
-        // Load slots by username (for OBS browser sources)
-        const slotsResponse = await fetch(`/api/slots/by-username?username=${username}`)
-        const slotsData = await slotsResponse.json()
-        if (slotsData.success && slotsData.slots) {
-          setSlots(slotsData.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-        }
+  // Use real-time subscriptions for slots and settings
+  const slotsData = useSupabaseSlotsByUsername(username || null)
+  const settingsData = useSupabaseUserSettingsByUsername(username || null)
 
-        // Load user settings by username
-        const settingsResponse = await fetch(`/api/user-settings/by-username?username=${username}`)
-        const settingsData = await settingsResponse.json()
-        if (settingsData.success && settingsData.settings) {
-          setStartBalance(Number.parseFloat(settingsData.settings.startBalance) || 0)
-          setEndBalance(Number.parseFloat(settingsData.settings.endBalance) || 0)
-        }
-      } else {
-        // Fallback to localStorage
-        const storedSlots = localStorage.getItem("slotList")
-        if (storedSlots) {
-          setSlots(JSON.parse(storedSlots))
-        }
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  })).filter((slot, index, self) => 
+    // Additional deduplication safeguard: keep only first occurrence of each ID or name
+    index === self.findIndex((s) => s.id === slot.id || s.name.toLowerCase().trim() === slot.name.toLowerCase().trim())
+  )
 
-        const storedStartBalance = localStorage.getItem("startBalance")
-        if (storedStartBalance) {
-          setStartBalance(Number.parseFloat(storedStartBalance))
-        }
-
-        const storedEndBalance = localStorage.getItem("endBalance")
-        if (storedEndBalance) {
-          setEndBalance(Number.parseFloat(storedEndBalance))
-        }
-      }
-    } catch (error) {
-      console.error("Error loading slots and balance:", error)
-    }
-  }, [username])
-
-  // Function to load all settings from Firestore (per user) or localStorage (fallback)
-  const loadSettings = useCallback(async () => {
-    if (username) {
-      // Load from Firestore when user parameter is provided
-      try {
-        const settingsResponse = await fetch(`/api/user-settings/by-username?username=${username}`)
-        const settingsData = await settingsResponse.json()
-        if (settingsData.success && settingsData.settings) {
-          if (settingsData.settings.spiderColors) {
-            setColors(settingsData.settings.spiderColors)
-          }
-          if (settingsData.settings.spiderTextColors) {
-            setTextColors(settingsData.settings.spiderTextColors)
-          }
-          if (settingsData.settings.spiderFontFamily) {
-            setFontFamily(settingsData.settings.spiderFontFamily)
-          }
-          if (settingsData.settings.spiderBorderWidth !== undefined) {
-            setBorderWidth(settingsData.settings.spiderBorderWidth)
-          }
-          if (settingsData.settings.spiderHeaderText) {
-            setHeaderText(settingsData.settings.spiderHeaderText)
-          }
-          return // Exit early if Firestore data loaded
-        }
-      } catch (error) {
-        console.error("Error loading spider settings from Firestore:", error)
-        // Fall through to localStorage fallback
-      }
-    }
-
-    // Fallback to localStorage for backwards compatibility
-    const storedColors = localStorage.getItem("spiderColors")
-    if (storedColors) {
-      setColors(JSON.parse(storedColors))
-    }
-
-    const storedTextColors = localStorage.getItem("spiderTextColors")
-    if (storedTextColors) {
-      setTextColors(JSON.parse(storedTextColors))
-    }
-
-    const storedFontFamily = localStorage.getItem("spiderFontFamily")
-    if (storedFontFamily) {
-      setFontFamily(storedFontFamily)
-    }
-
-    const storedBorderWidth = localStorage.getItem("spiderBorderWidth")
-    if (storedBorderWidth) {
-      setBorderWidth(Number.parseInt(storedBorderWidth))
-    }
-
-    const storedHeaderText = localStorage.getItem("spiderHeaderText")
-    if (storedHeaderText) {
-      setHeaderText(storedHeaderText)
-    }
-  }, [username])
-
-  // Initial load
+  // Update balance from real-time settings
   useEffect(() => {
-    loadSettings()
-    loadSlotsAndBalance()
-
-    // Set up interval to check for updates
-    const slotsInterval = setInterval(loadSlotsAndBalance, 2000) // Check every 2 seconds for slots/balance
-    const settingsInterval = setInterval(() => loadSettings(), 2000) // Check every 2 seconds for styling settings
-
-    return () => {
-      clearInterval(slotsInterval)
-      clearInterval(settingsInterval)
+    if (settingsData?.settings) {
+      const s = settingsData.settings
+      // Only update if value exists (not null/undefined/empty)
+      if (s.startBalance != null && s.startBalance !== "") {
+        setStartBalance(Number.parseFloat(s.startBalance) || 0)
+      }
+      if (s.endBalance != null && s.endBalance !== "") {
+        setEndBalance(Number.parseFloat(s.endBalance) || 0)
+      }
+      
+      // Update spider-specific settings
+      if (s.spiderColors) {
+        setColors(s.spiderColors)
+      }
+      if (s.spiderTextColors) {
+        setTextColors(s.spiderTextColors)
+      }
+      if (s.spiderFontFamily) {
+        setFontFamily(s.spiderFontFamily)
+      }
+      if (s.spiderBorderWidth !== undefined) {
+        setBorderWidth(s.spiderBorderWidth)
+      }
+      if (s.spiderHeaderText) {
+        setHeaderText(s.spiderHeaderText)
+      }
     }
-  }, [loadSettings, loadSlotsAndBalance])
+  }, [settingsData?.settings])
+
+  // Fallback to localStorage if no username (for backwards compatibility)
+  useEffect(() => {
+    if (!username) {
+      const storedSlots = localStorage.getItem("slotList")
+      if (storedSlots) {
+        // Note: Real-time subscriptions won't work without username
+        // This is a fallback for backwards compatibility only
+      }
+
+      const storedStartBalance = localStorage.getItem("startBalance")
+      if (storedStartBalance) {
+        setStartBalance(Number.parseFloat(storedStartBalance))
+      }
+
+      const storedEndBalance = localStorage.getItem("endBalance")
+      if (storedEndBalance) {
+        setEndBalance(Number.parseFloat(storedEndBalance))
+      }
+
+      const storedColors = localStorage.getItem("spiderColors")
+      if (storedColors) {
+        setColors(JSON.parse(storedColors))
+      }
+
+      const storedTextColors = localStorage.getItem("spiderTextColors")
+      if (storedTextColors) {
+        setTextColors(JSON.parse(storedTextColors))
+      }
+
+      const storedFontFamily = localStorage.getItem("spiderFontFamily")
+      if (storedFontFamily) {
+        setFontFamily(storedFontFamily)
+      }
+
+      const storedBorderWidth = localStorage.getItem("spiderBorderWidth")
+      if (storedBorderWidth) {
+        setBorderWidth(Number.parseInt(storedBorderWidth))
+      }
+
+      const storedHeaderText = localStorage.getItem("spiderHeaderText")
+      if (storedHeaderText) {
+        setHeaderText(storedHeaderText)
+      }
+    }
+  }, [username])
 
   // Set up stats rotation
   useEffect(() => {

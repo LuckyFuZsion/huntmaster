@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import CurrentGameWidget from "@/components/CurrentGameWidget";
+import ExtensionGameWidget from "@/components/ExtensionGameWidget";
 import { useSearchParams } from "next/navigation";
 
 function CurrentGameExampleContent() {
@@ -12,7 +12,7 @@ function CurrentGameExampleContent() {
   return (
     <div style={{ padding: 24 }}>
       <h1 style={{ fontWeight: 700, marginBottom: 16 }}>Current Game Widget (Example)</h1>
-      <CurrentGameWidget title={title} provider={provider} />
+      <ExtensionGameWidget title={title} provider={provider} />
       <div style={{ marginTop: 16, color: "#999", fontSize: 12 }}>
         Try query params like <code>?title=Sugar%20Rush&provider=Pragmatic%20Play</code>
       </div>

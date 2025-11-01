@@ -45,25 +45,27 @@ function CollectBonusesContent() {
           const response = await fetch(`/api/slots/by-username?username=${username}`)
           const data = await response.json()
           console.log("Loaded slots from Firestore (username):", data.slots?.length || 0, "slots")
-          if (data.success && data.slots) {
-            const loadedSlots = data.slots.map((slot: any) => ({
-              id: slot.id,
-              name: slot.name,
-              bet: slot.bet,
-              win: slot.win,
-            }))
-            
-            // Deduplicate by name on load
-            const seen = new Map<string, Slot>()
-            const uniqueSlots = loadedSlots.filter(slot => {
-              if (seen.has(slot.name)) {
-                console.log("Duplicate slot on load:", slot.name)
-                return false
-              }
-              seen.set(slot.name, slot)
-              return true
-            })
-            
+          if (data.success) {
+            // Always process slots, even if empty array
+            if (data.slots && Array.isArray(data.slots) && data.slots.length > 0) {
+              const loadedSlots = data.slots.map((slot: any) => ({
+                id: slot.id,
+                name: slot.name,
+                bet: slot.bet,
+                win: slot.win,
+              }))
+              
+              // Deduplicate by name on load
+              const seen = new Map<string, Slot>()
+              const uniqueSlots = loadedSlots.filter(slot => {
+                if (seen.has(slot.name)) {
+                  console.log("Duplicate slot on load:", slot.name)
+                  return false
+                }
+                seen.set(slot.name, slot)
+                return true
+              })
+              
               if (uniqueSlots.length !== loadedSlots.length) {
                 console.log(`Removed ${loadedSlots.length - uniqueSlots.length} duplicates on load`)
               }
@@ -77,9 +79,15 @@ function CollectBonusesContent() {
                 .map(slot => slot.id)
               setSavedSlots(new Set(slotsWithWins))
               console.log("Marked slots as saved:", slotsWithWins.length, "slots with wins")
-              
-              setInitialLoadComplete(true)
+            } else {
+              // No slots found or empty array - set empty state
+              console.log("No slots found for user")
+              setSlots([])
+              setSavedSlots(new Set())
+            }
+            setInitialLoadComplete(true)
           } else {
+            console.error("Failed to load slots:", data.error)
             setInitialLoadComplete(true)
           }
         } else {
@@ -95,40 +103,48 @@ function CollectBonusesContent() {
             })
             const data = await response.json()
             console.log("Loaded slots from Firestore (session):", data.slots?.length || 0, "slots")
-            if (data.success && data.slots) {
-              const loadedSlots = data.slots.map((slot: any) => ({
-                id: slot.id,
-                name: slot.name,
-                bet: slot.bet,
-                win: slot.win,
-              }))
-              
-              // Deduplicate by name on load
-              const seen = new Map<string, Slot>()
-              const uniqueSlots = loadedSlots.filter(slot => {
-                if (seen.has(slot.name)) {
-                  console.log("Duplicate slot on load (session):", slot.name)
-                  return false
+            if (data.success) {
+              // Always process slots, even if empty array
+              if (data.slots && Array.isArray(data.slots) && data.slots.length > 0) {
+                const loadedSlots = data.slots.map((slot: any) => ({
+                  id: slot.id,
+                  name: slot.name,
+                  bet: slot.bet,
+                  win: slot.win,
+                }))
+                
+                // Deduplicate by name on load
+                const seen = new Map<string, Slot>()
+                const uniqueSlots = loadedSlots.filter(slot => {
+                  if (seen.has(slot.name)) {
+                    console.log("Duplicate slot on load (session):", slot.name)
+                    return false
+                  }
+                  seen.set(slot.name, slot)
+                  return true
+                })
+                
+                if (uniqueSlots.length !== loadedSlots.length) {
+                  console.log(`Removed ${loadedSlots.length - uniqueSlots.length} duplicates on load (session)`)
                 }
-                seen.set(slot.name, slot)
-                return true
-              })
-              
-              if (uniqueSlots.length !== loadedSlots.length) {
-                console.log(`Removed ${loadedSlots.length - uniqueSlots.length} duplicates on load (session)`)
+                
+                setSlots(uniqueSlots)
+                
+                // Mark slots with existing win amounts as already saved
+                const slotsWithWins = uniqueSlots
+                  .filter(slot => slot.win !== null && slot.win > 0)
+                  .map(slot => slot.id)
+                setSavedSlots(new Set(slotsWithWins))
+                console.log("Marked slots as saved (session):", slotsWithWins.length, "slots with wins")
+              } else {
+                // No slots found or empty array - set empty state
+                console.log("No slots found for session")
+                setSlots([])
+                setSavedSlots(new Set())
               }
-              
-              setSlots(uniqueSlots)
-              
-              // Mark slots with existing win amounts as already saved
-              const slotsWithWins = uniqueSlots
-                .filter(slot => slot.win !== null && slot.win > 0)
-                .map(slot => slot.id)
-              setSavedSlots(new Set(slotsWithWins))
-              console.log("Marked slots as saved (session):", slotsWithWins.length, "slots with wins")
-              
               setInitialLoadComplete(true)
             } else {
+              console.error("Failed to load slots:", data.error)
               setInitialLoadComplete(true)
             }
           } else {
@@ -328,18 +344,24 @@ function CollectBonusesContent() {
             </div>
           ) : (
             <ScrollArea className="h-[420px] w-full">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[30px] p-2">No.</TableHead>
-                    <TableHead className="w-[110px] p-2">Slot Name</TableHead>
-                    <TableHead className="w-[50px] p-2">Bet</TableHead>
-                    <TableHead className="p-2">Win Amount</TableHead>
-                    <TableHead className="w-[40px] p-2"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {slots.map((slot, index) => (
+              {slots.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8">
+                  <p>No slots found.</p>
+                  <p className="text-xs mt-2">Add games to your hunt list first.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[30px] p-2">No.</TableHead>
+                      <TableHead className="w-[110px] p-2">Slot Name</TableHead>
+                      <TableHead className="w-[50px] p-2">Bet</TableHead>
+                      <TableHead className="p-2">Win Amount</TableHead>
+                      <TableHead className="w-[40px] p-2"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {slots.map((slot, index) => (
                     <TableRow key={slot.id}>
                       <TableCell className="text-center p-2">{index + 1}</TableCell>
                       <TableCell className="p-2">{slot.name}</TableCell>
@@ -365,8 +387,9 @@ function CollectBonusesContent() {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
+                  </TableBody>
+                </Table>
+              )}
             </ScrollArea>
           )}
         </div>

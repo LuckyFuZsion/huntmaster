@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { firestoreAdmin } from "@/lib/firestore-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
   try {
@@ -10,12 +10,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "username is required" }, { status: 400 });
     }
 
-    const user = await firestoreAdmin.users.findByUsername(username);
+    const user = await supabaseAdmin.users.findByUsername(username);
     if (!user) {
       return NextResponse.json({ success: false, error: "User not found" }, { status: 404 });
     }
 
-    const slots = await firestoreAdmin.slots.findByUserId(user.id);
+    const slots = await supabaseAdmin.slots.findByUserId(user.id);
 
     // Deduplicate by name (keep first occurrence) then find first with win === null
     const seen = new Set<string>();
@@ -48,3 +48,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
+
+

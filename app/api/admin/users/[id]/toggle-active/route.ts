@@ -1,5 +1,22 @@
 import { NextResponse } from "next/server"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 import { firestoreAdmin } from "@/lib/firestore-admin"
+
+async function getUserAdmin(id: string) {
+  try {
+    return await supabaseAdmin.users.findOne(id)
+  } catch {
+    return await firestoreAdmin.users.findOne(id)
+  }
+}
+
+async function updateUser(id: string, updateData: any) {
+  try {
+    await supabaseAdmin.users.update(id, updateData)
+  } catch {
+    await firestoreAdmin.users.update(id, updateData)
+  }
+}
 
 export async function PATCH(request: Request) {
   try {
@@ -31,7 +48,7 @@ export async function PATCH(request: Request) {
     }
 
     // Check if user is admin - admins cannot be deactivated
-    const user = await firestoreAdmin.users.findOne(id)
+    const user = await getUserAdmin(id)
 
     if (!user) {
       return NextResponse.json(
@@ -43,7 +60,9 @@ export async function PATCH(request: Request) {
       )
     }
 
-    if (user.isAdmin && !isActive) {
+    // Check both isAdmin and huntmasterAdmin
+    const isAdminUser = user.isAdmin || user.huntmasterAdmin
+    if (isAdminUser && !isActive) {
       return NextResponse.json(
         {
           success: false,
@@ -53,7 +72,7 @@ export async function PATCH(request: Request) {
       )
     }
 
-    await firestoreAdmin.users.update(id, { isActive })
+    await updateUser(id, { isActive })
 
     return NextResponse.json({
       success: true,

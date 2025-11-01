@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { decrypt } from "@/lib/protection"
 
 interface Slot {
   id: string
@@ -18,46 +21,33 @@ export default function OBSBrowserSource8() {
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
   const username = searchParams.get("user")
+  const [userId, setUserId] = useState<string | null>(null)
 
-  const [slots, setSlots] = useState<Slot[]>([])
+  // Use real-time subscriptions
+  const slotsByUsername = useSupabaseSlotsByUsername(username || null)
+  const slotsByUserId = useSupabaseSlots(username ? null : userId)
+
+  const slotsData = username ? slotsByUsername : slotsByUserId
+
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  }))
 
   useEffect(() => {
-    const loadSlotsFromFirestore = async () => {
-      try {
-        if (username) {
-          const response = await fetch(`/api/slots/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-          }
-        } else {
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/slots", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ session, action: "get" }),
-            })
-            const data = await response.json()
-            if (data.success && data.slots) {
-              setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-            }
-          }
+    if (!username) {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
+        } catch (error) {
+          setUserId(null)
         }
-      } catch (error) {
-        console.error("Error loading slots:", error)
       }
     }
-
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
-    }
-
-    loadData()
-    const interval = setInterval(loadData, 2000)
-    return () => clearInterval(interval)
   }, [username])
 
   return (

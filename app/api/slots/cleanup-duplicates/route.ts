@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { firestoreAdmin } from "@/lib/firestore-admin"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 import { decrypt } from "@/lib/protection"
 
 export async function POST(request: Request) {
@@ -14,14 +14,13 @@ export async function POST(request: Request) {
     const userId = sessionData.userId
 
     // Get all slots for this user
-    const allSlots = await firestoreAdmin.slots.findAll()
-    const userSlots = allSlots.filter(slot => slot.userId === userId)
+    const allSlots = await supabaseAdmin.slots.findByUserId(userId)
     
-    console.log(`Found ${userSlots.length} total slots for user ${userId}`)
+    console.log(`Found ${allSlots.length} total slots for user ${userId}`)
     
-    // Group by name to find duplicates
-    const slotsByName = new Map<string, typeof userSlots>()
-    for (const slot of userSlots) {
+    // Group by name (case-insensitive) to find duplicates
+    const slotsByName = new Map<string, typeof allSlots>()
+    for (const slot of allSlots) {
       const name = slot.name.toLowerCase().trim()
       if (!slotsByName.has(name)) {
         slotsByName.set(name, [])
@@ -29,66 +28,55 @@ export async function POST(request: Request) {
       slotsByName.get(name)!.push(slot)
     }
     
-    // Find duplicates and keep only the most recent one
+    // Find duplicates and keep only the most recent one (by createdAt or id)
     const duplicatesToDelete: string[] = []
     let keptSlots = 0
     let deletedSlots = 0
     
     for (const [name, slotsWithSameName] of slotsByName.entries()) {
       if (slotsWithSameName.length > 1) {
-        console.log(`Found ${slotsWithSameName.length} duplicates for "${name}"`)
-        
-        // Sort by createdAt descending (most recent first)
-        const sorted = slotsWithSameName.sort((a, b) => {
-          const aDate = a.createdAt instanceof Date ? a.createdAt : (a.createdAt as any)?.toDate?.() || new Date(0)
-          const bDate = b.createdAt instanceof Date ? b.createdAt : (b.createdAt as any)?.toDate?.() || new Date(0)
-          return bDate.getTime() - aDate.getTime()
+        // Sort by createdAt descending (most recent first), or by id as fallback
+        slotsWithSameName.sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0).getTime()
+          const dateB = new Date(b.createdAt || 0).getTime()
+          if (dateB !== dateA) return dateB - dateA
+          return b.id.localeCompare(a.id) // Fallback to ID comparison
         })
         
-        // Keep the first (most recent) one
-        keptSlots++
-        console.log(`Keeping slot "${name}" with ID: ${sorted[0].id}`)
+        // Keep the first one (most recent), delete the rest
+        const toKeep = slotsWithSameName[0]
+        const toDelete = slotsWithSameName.slice(1)
         
-        // Mark all others for deletion
-        for (let i = 1; i < sorted.length; i++) {
-          duplicatesToDelete.push(sorted[i].id)
+        keptSlots++
+        for (const slot of toDelete) {
+          duplicatesToDelete.push(slot.id)
           deletedSlots++
-          console.log(`Marking duplicate "${name}" with ID ${sorted[i].id} for deletion`)
         }
+        
+        console.log(`Found ${slotsWithSameName.length} duplicates for "${name}" - keeping ${toKeep.id}, deleting ${toDelete.length} others`)
       } else {
         keptSlots++
       }
     }
     
-    console.log(`Deleting ${duplicatesToDelete.length} duplicate slots...`)
-    
-    // Delete duplicates
-    if (duplicatesToDelete.length > 0) {
-      const { adminDb } = await import("@/lib/firebase-admin")
-      const batch = adminDb.batch()
-      
-      for (const id of duplicatesToDelete) {
-        const docRef = adminDb.collection("slots").doc(id)
-        batch.delete(docRef)
-      }
-      
-      await batch.commit()
-      console.log(`Successfully deleted ${duplicatesToDelete.length} duplicate slots`)
+    // Delete all duplicate slots
+    for (const slotId of duplicatesToDelete) {
+      await supabaseAdmin.slots.delete(slotId)
     }
     
-    return NextResponse.json({
-      success: true,
-      message: `Cleanup complete: Kept ${keptSlots} unique slots, deleted ${deletedSlots} duplicates`,
+    console.log(`Cleanup complete: Kept ${keptSlots} unique slots, deleted ${deletedSlots} duplicates`)
+    
+    return NextResponse.json({ 
+      success: true, 
+      message: `Cleaned up ${deletedSlots} duplicate slots`,
       keptSlots,
-      deletedSlots,
-      totalSlotsBefore: userSlots.length,
+      deletedSlots
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error cleaning up duplicates:", error)
     return NextResponse.json({ 
       success: false, 
-      error: "Failed to cleanup duplicates" 
+      error: error.message || "Failed to cleanup duplicates" 
     }, { status: 500 })
   }
 }
-

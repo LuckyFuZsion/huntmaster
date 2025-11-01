@@ -17,6 +17,8 @@ export async function GET(request: Request) {
         "www.slot-streamers.com",
         "slot-streamers.com",
         "gxciioabwrkahdfe.public.blob.vercel-storage.com",
+        "res.cloudinary.com",
+        "cloudinary.com",
       ];
       
       const isAllowed = allowedDomains.some((domain) => imageUrl.hostname === domain || imageUrl.hostname.endsWith(`.${domain}`));

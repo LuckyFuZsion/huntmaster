@@ -5,6 +5,11 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { Trophy, Zap, Sparkles, Flame, Skull, DollarSign } from "lucide-react"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { decrypt } from "@/lib/protection"
 
 interface Slot {
   id: string
@@ -22,72 +27,53 @@ export default function OBSBrowserSource5() {
   const size = searchParams.get("size") || "600px"
   const borderRadius = searchParams.get("radius") || "20px"
   const username = searchParams.get("user")
-
-  const [slots, setSlots] = useState<Slot[]>([])
+  const [userId, setUserId] = useState<string | null>(null)
   const [startBalance, setStartBalance] = useState(0)
   const [endBalance, setEndBalance] = useState(0)
   const [currentStats, setCurrentStats] = useState(0)
 
+  // Use real-time subscriptions
+  const slotsByUsername = useSupabaseSlotsByUsername(username || null)
+  const slotsByUserId = useSupabaseSlots(username ? null : userId)
+  const settingsByUsername = useSupabaseUserSettingsByUsername(username || null)
+  const settingsByUserId = useSupabaseUserSettings(username ? null : userId)
+
+  const slotsData = username ? slotsByUsername : slotsByUserId
+  const settingsData = username ? settingsByUsername : settingsByUserId
+
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  }))
+
   useEffect(() => {
-    const loadSlotsFromFirestore = async () => {
-      try {
-        if (username) {
-          const response = await fetch(`/api/slots/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-          }
-        } else {
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/slots", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
-            const data = await response.json()
-            if (data.success && data.slots) {
-              setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-            }
-          }
+    if (!username) {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
+        } catch (error) {
+          setUserId(null)
         }
-      } catch (error) {
-        console.error("Error loading slots:", error)
       }
     }
-    
-    const loadUserSettings = async () => {
-      try {
-        if (username) {
-          // Load settings by username (for OBS browser sources)
-          const response = await fetch(`/api/user-settings/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.settings) {
-            setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
-            setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
-          }
-        } else {
-          // Fallback to session-based loading
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
-            const data = await response.json()
-            if (data.success && data.settings) {
-              setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
-              setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error loading user settings:", error)
-      }
-    }
-
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
-      await loadUserSettings()
-    }
-
-    loadData()
-    const interval = setInterval(loadData, 2000)
-    return () => clearInterval(interval)
   }, [username])
+
+  useEffect(() => {
+    if (settingsData?.settings) {
+      const s = settingsData.settings
+      // Only update if value exists (not null/undefined/empty)
+      if (s.startBalance != null && s.startBalance !== "") {
+        setStartBalance(Number.parseFloat(s.startBalance) || 0)
+      }
+      if (s.endBalance != null && s.endBalance !== "") {
+        setEndBalance(Number.parseFloat(s.endBalance) || 0)
+      }
+    }
+  }, [settingsData?.settings])
 
   useEffect(() => {
     const interval = setInterval(() => {

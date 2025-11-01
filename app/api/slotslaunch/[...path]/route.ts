@@ -57,3 +57,6 @@ export async function PATCH(request: Request, { params }: { params: { path: stri
 export async function DELETE(request: Request, { params }: { params: { path: string[] } }) {
   return forward(request, params.path);
 }
+
+
+

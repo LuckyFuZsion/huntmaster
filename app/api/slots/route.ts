@@ -1,7 +1,35 @@
 import { NextResponse } from "next/server"
-import { firestoreAdmin } from "@/lib/firestore-admin"
-import { adminDb } from "@/lib/firebase-admin"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 import { decrypt } from "@/lib/protection"
+
+// Simple in-memory cache with TTL
+const cache = new Map<string, { data: any; timestamp: number }>()
+const CACHE_TTL = 5000 // 5 seconds
+
+function getCached(key: string) {
+  const cached = cache.get(key)
+  if (!cached) return null
+  
+  const age = Date.now() - cached.timestamp
+  if (age > CACHE_TTL) {
+    cache.delete(key)
+    return null
+  }
+  
+  return cached.data
+}
+
+function setCache(key: string, data: any) {
+  cache.set(key, { data, timestamp: Date.now() })
+}
+
+function invalidateCache(keyPrefix: string) {
+  for (const key of cache.keys()) {
+    if (key.startsWith(keyPrefix)) {
+      cache.delete(key)
+    }
+  }
+}
 
 // Handle both get and save operations via POST
 export async function POST(request: Request) {
@@ -16,8 +44,15 @@ export async function POST(request: Request) {
     const userId = sessionData.userId
 
     if (action === "get") {
+      // Check cache first
+      const cacheKey = `slots:userId:${userId}`
+      const cached = getCached(cacheKey)
+      if (cached) {
+        return NextResponse.json(cached)
+      }
+
       // Get slots for the user
-      const slots = await firestoreAdmin.slots.findByUserId(userId)
+      const slots = await supabaseAdmin.slots.findByUserId(userId)
       
       console.log(`Loaded ${slots.length} slots for userId ${userId}`)
       console.log("Slot names:", slots.map(s => s.name))
@@ -40,8 +75,16 @@ export async function POST(request: Request) {
         console.log(`Deduplicated: ${slots.length} slots -> ${uniqueSlots.length} unique slots`)
       }
       
-      return NextResponse.json({ success: true, slots: uniqueSlots })
+      const response = { success: true, slots: uniqueSlots }
+      
+      // Cache the response
+      setCache(cacheKey, response)
+      
+      return NextResponse.json(response)
     } else if (action === "update-single") {
+      // Invalidate cache when updating
+      invalidateCache(`slots:userId:${userId}`)
+      
       // Update a single slot instead of recreating all slots
       if (!singleSlot || !singleSlot.id) {
         return NextResponse.json({ success: false, error: "Slot ID is required" }, { status: 400 })
@@ -51,10 +94,10 @@ export async function POST(request: Request) {
       
       try {
         // Get the existing slot to compare win values
-        const existingSlot = await adminDb.collection("slots").doc(singleSlot.id).get()
-        const prevWin = existingSlot.exists ? (existingSlot.data()?.win ?? null) : null
+        const existingSlot = await supabaseAdmin.slots.findOne(singleSlot.id)
+        const prevWin = existingSlot ? (existingSlot.win ?? null) : null
         
-        await firestoreAdmin.slots.update(singleSlot.id, {
+        await supabaseAdmin.slots.update(singleSlot.id, {
           name: singleSlot.name,
           bet: singleSlot.bet,
           win: singleSlot.win,
@@ -69,29 +112,56 @@ export async function POST(request: Request) {
           const bet = Number(singleSlot.bet) || 0
           const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
           console.log("Attempting to record win - gameTitle:", singleSlot.name, "bet:", bet, "winAmount:", newWin, "xWin:", xWin)
+          
+          // Verify game exists in database before saving
+          const gameTitleTrimmed = String(singleSlot.name).trim()
+          let gameExists = false
           try {
-            const winRecord: any = {
-              userId,
-              gameTitle: String(singleSlot.name).trim(),
-              bet: bet,
-              winAmount: Number(newWin),
-              xWin,
+            const origin = request.url.startsWith("http") ? new URL(request.url).origin : "http://localhost:3000"
+            const searchUrl = new URL("/api/slots-suggest", origin)
+            searchUrl.searchParams.set("q", gameTitleTrimmed)
+            searchUrl.searchParams.set("limit", "10")
+            searchUrl.searchParams.set("exhaustive", "1")
+            
+            const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" })
+            const searchData = await searchRes.json()
+            if (searchData.success && Array.isArray(searchData.data)) {
+              const titleLower = gameTitleTrimmed.toLowerCase()
+              gameExists = searchData.data.some((it: any) => 
+                it.title?.toLowerCase().trim() === titleLower
+              )
             }
-            // Only include optional fields if they have values (Firestore doesn't allow undefined)
-            // gameSlug and provider can be added later if needed
-            console.log("Creating userWin with data:", JSON.stringify(winRecord))
-            const created = await firestoreAdmin.userWins.create(winRecord)
-            console.log("✅ Successfully recorded user win. ID:", created.id, "Game:", singleSlot.name, "Win:", newWin, "X:", xWin)
           } catch (e: any) {
-            console.error("❌ Failed to record user win:", e)
-            console.error("Error details:", {
-              message: e?.message,
-              code: e?.code,
-              stack: e?.stack,
-              userId,
-              gameTitle: singleSlot.name,
-              winAmount: newWin
-            })
+            console.error("Error verifying game existence:", e)
+          }
+          
+          if (!gameExists) {
+            console.log("⚠️ Skipping win record - game not found in database:", gameTitleTrimmed)
+          } else {
+            try {
+              const winRecord: any = {
+                userId,
+                gameTitle: gameTitleTrimmed,
+                bet: bet,
+                winAmount: Number(newWin),
+                xWin,
+              }
+              // Only include optional fields if they have values (Firestore doesn't allow undefined)
+              // gameSlug and provider can be added later if needed
+              console.log("Creating userWin with data:", JSON.stringify(winRecord))
+              const created = await supabaseAdmin.userWins.create(winRecord)
+              console.log("✅ Successfully recorded user win. ID:", created.id, "Game:", singleSlot.name, "Win:", newWin, "X:", xWin)
+            } catch (e: any) {
+              console.error("❌ Failed to record user win:", e)
+              console.error("Error details:", {
+                message: e?.message,
+                code: e?.code,
+                stack: e?.stack,
+                userId,
+                gameTitle: singleSlot.name,
+                winAmount: newWin
+              })
+            }
           }
         } else {
           console.log("Skipping win record - no valid win amount. newWin:", newWin)
@@ -102,9 +172,9 @@ export async function POST(request: Request) {
       } catch (updateError: any) {
         console.error("Error updating slot:", updateError)
         // If the slot doesn't exist, try creating it instead
-        if (updateError.code === "not-found" || updateError.code === 5) {
+        if (updateError.code === "PGRST116" || updateError.code === "not-found" || updateError.code === 5) {
           console.log("Slot not found, creating new slot instead")
-          const newSlot = await firestoreAdmin.slots.create({
+          const newSlot = await supabaseAdmin.slots.create({
             name: singleSlot.name,
             bet: singleSlot.bet,
             win: singleSlot.win,
@@ -117,17 +187,44 @@ export async function POST(request: Request) {
           if (newWin !== null && newWin >= 0) {
             const bet = Number(singleSlot.bet) || 0
             const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
+            
+            // Verify game exists in database before saving
+            const gameTitleTrimmed = String(singleSlot.name).trim()
+            let gameExists = false
             try {
-              await firestoreAdmin.userWins.create({
-                userId,
-                gameTitle: String(singleSlot.name).trim(),
-                bet: bet,
-                winAmount: Number(newWin),
-                xWin,
-              })
-              console.log("Recorded user win for new slot:", singleSlot.name, "Win:", newWin, "X:", xWin)
-            } catch (e) {
-              console.error("Failed to record user win for new slot:", e)
+              const origin = request.url.startsWith("http") ? new URL(request.url).origin : "http://localhost:3000"
+              const searchUrl = new URL("/api/slots-suggest", origin)
+              searchUrl.searchParams.set("q", gameTitleTrimmed)
+              searchUrl.searchParams.set("limit", "10")
+              searchUrl.searchParams.set("exhaustive", "1")
+              
+              const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" })
+              const searchData = await searchRes.json()
+              if (searchData.success && Array.isArray(searchData.data)) {
+                const titleLower = gameTitleTrimmed.toLowerCase()
+                gameExists = searchData.data.some((it: any) => 
+                  it.title?.toLowerCase().trim() === titleLower
+                )
+              }
+            } catch (e: any) {
+              console.error("Error verifying game existence:", e)
+            }
+            
+            if (!gameExists) {
+              console.log("⚠️ Skipping win record for new slot - game not found in database:", gameTitleTrimmed)
+            } else {
+              try {
+                await supabaseAdmin.userWins.create({
+                  userId,
+                  gameTitle: gameTitleTrimmed,
+                  bet: bet,
+                  winAmount: Number(newWin),
+                  xWin,
+                })
+                console.log("Recorded user win for new slot:", singleSlot.name, "Win:", newWin, "X:", xWin)
+              } catch (e) {
+                console.error("Failed to record user win for new slot:", e)
+              }
             }
           }
           
@@ -136,24 +233,54 @@ export async function POST(request: Request) {
         throw updateError // Re-throw if it's a different error
       }
     } else if (action === "save") {
+      // Invalidate cache when saving
+      invalidateCache(`slots:userId:${userId}`)
+      
+      // Deduplicate slots BEFORE saving to prevent duplicates in database
+      const seenIds = new Set<string>()
+      const seenNames = new Map<string, any>()
+      const uniqueSlotData = []
+      
+      for (const slot of slotData) {
+        // Check by ID first
+        if (slot.id && seenIds.has(slot.id)) {
+          console.log(`Duplicate slot ID in save: "${slot.name}" (${slot.id}) - skipping`)
+          continue
+        }
+        if (slot.id) seenIds.add(slot.id)
+        
+        // Also check by name (case-insensitive) to catch duplicates with different IDs
+        const nameKey = slot.name.toLowerCase().trim()
+        if (seenNames.has(nameKey)) {
+          console.log(`Duplicate slot name in save: "${slot.name}" - skipping`)
+          continue
+        }
+        seenNames.set(nameKey, slot)
+        uniqueSlotData.push(slot)
+      }
+      
+      if (uniqueSlotData.length !== slotData.length) {
+        console.log(`Deduplicated before save: ${slotData.length} -> ${uniqueSlotData.length} unique slots`)
+      }
+      
       // Save slots for the user (full save - deletes and recreates)
-      console.log("Saving slots to Firestore, received:", slotData.length, "slots")
+      console.log("Saving slots to Supabase, received:", uniqueSlotData.length, "unique slots")
 
       // Load existing to detect newly entered wins
-      const previousSlots = await firestoreAdmin.slots.findByUserId(userId)
+      const previousSlots = await supabaseAdmin.slots.findByUserId(userId)
       const prevByKey = new Map<string, any>()
       for (const s of previousSlots) {
         const k = `${s.name}`.trim().toLowerCase() + `|${Number(s.bet)}`
         if (!prevByKey.has(k)) prevByKey.set(k, s)
       }
-
+      
       // Delete all existing slots for this user
-      await firestoreAdmin.slots.deleteAllByUserId(userId)
+      await supabaseAdmin.slots.deleteAllByUserId(userId)
 
       // Create new slots and record wins that are new or improved
       const createdSlots = []
-      for (const slot of slotData) {
-        const newSlot = await firestoreAdmin.slots.create({
+      for (const slot of uniqueSlotData) {
+        const newSlot = await supabaseAdmin.slots.create({
           name: slot.name,
           bet: slot.bet,
           win: slot.win,
@@ -169,21 +296,48 @@ export async function POST(request: Request) {
         if (newWin !== null && newWin >= 0 && (prevWin === null || newWin !== prevWin)) {
           const bet = Number(slot.bet) || 0
           const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
+          
+          // Verify game exists in database before saving
+          const gameTitleTrimmed = String(slot.name).trim()
+          let gameExists = false
           try {
-            await firestoreAdmin.userWins.create({
-              userId,
-              gameTitle: String(slot.name).trim(),
-              bet: bet,
-              winAmount: Number(newWin),
-              xWin,
-            })
-          } catch (e) {
-            console.error("Failed to record user win:", e)
+            const origin = request.url.startsWith("http") ? new URL(request.url).origin : "http://localhost:3000"
+            const searchUrl = new URL("/api/slots-suggest", origin)
+            searchUrl.searchParams.set("q", gameTitleTrimmed)
+            searchUrl.searchParams.set("limit", "10")
+            searchUrl.searchParams.set("exhaustive", "1")
+            
+            const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" })
+            const searchData = await searchRes.json()
+            if (searchData.success && Array.isArray(searchData.data)) {
+              const titleLower = gameTitleTrimmed.toLowerCase()
+              gameExists = searchData.data.some((it: any) => 
+                it.title?.toLowerCase().trim() === titleLower
+              )
+            }
+          } catch (e: any) {
+            console.error("Error verifying game existence:", e)
+          }
+          
+          if (!gameExists) {
+            console.log("⚠️ Skipping win record - game not found in database:", gameTitleTrimmed)
+          } else {
+            try {
+              await supabaseAdmin.userWins.create({
+                userId,
+                gameTitle: gameTitleTrimmed,
+                bet: bet,
+                winAmount: Number(newWin),
+                xWin,
+              })
+            } catch (e) {
+              console.error("Failed to record user win:", e)
+            }
           }
         }
       }
       
-      console.log("Saved slots to Firestore, created:", createdSlots.length, "slots")
+      console.log("Saved slots to Supabase, created:", createdSlots.length, "slots")
       console.log("Slot IDs:", createdSlots.map(s => s.id))
 
       return NextResponse.json({ success: true, slots: createdSlots })
@@ -198,10 +352,20 @@ export async function POST(request: Request) {
       stack: error.stack,
       action: error.action || "unknown"
     })
+    
+    // Check for database errors
+    const isQuotaError = error.code === "RESOURCE_EXHAUSTED" || 
+                        error.code === 8 || 
+                        error.message?.includes("quota") ||
+                        error.message?.includes("resource exhausted")
+    
     return NextResponse.json({ 
       success: false, 
-      error: error.message || "Failed to process slots",
+      error: isQuotaError 
+        ? "Database quota exceeded. Please check your Supabase plan or wait for quota reset."
+        : error.message || "Failed to process slots",
+      code: error.code,
       details: process.env.NODE_ENV === "development" ? error.message : undefined
-    }, { status: 500 })
+    }, { status: isQuotaError ? 429 : 500 })
   }
 }

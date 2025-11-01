@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { encrypt } from "@/lib/protection"
-import { firestoreAdmin } from "@/lib/firestore-admin"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+import { firestoreAdmin } from "@/lib/firestore-admin" // Fallback only
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,12 +16,24 @@ export async function GET(request: NextRequest) {
     const clientSecret = clientSecretRaw?.replace(/^["']|["']$/g, "") || undefined
     
     // Determine base URL for local development vs production
-    // Strip quotes from NEXT_PUBLIC_APP_URL if present
-    const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || ""
-    const appUrl = appUrlRaw.replace(/^["']|["']$/g, "") || undefined
+    // Check host header first to detect localhost
     const host = request.headers.get("host") || ""
-    const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https"
-    const baseUrl = appUrl || `${protocol}://${host}`
+    const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0")
+    
+    // For localhost, always use localhost URL
+    let baseUrl: string
+    if (isLocalhost) {
+      const port = host.includes(":") ? host.split(":")[1] : "3000"
+      baseUrl = `http://localhost:${port}`
+    } else {
+      // For production, use NEXT_PUBLIC_APP_URL or construct from host
+      const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || ""
+      const appUrl = appUrlRaw.replace(/^["']|["']$/g, "") || undefined
+      const protocol = "https"
+      baseUrl = appUrl || `${protocol}://${host}`
+    }
+    
+    console.log("Base URL determined:", baseUrl, "Host:", host, "Is localhost:", isLocalhost)
     
     // Use DISCORD_REDIRECT_URI from env if set (must match what Discord expects)
     // Check multiple possible env var names and default to /api/auth/callback/discord
@@ -103,14 +116,38 @@ export async function GET(request: NextRequest) {
     console.log("User data obtained:", displayName, "Email:", userData.email || "not provided")
     console.log("Discord username:", userData.username, "Global name:", userData.global_name || "not set")
 
-    // Check if user exists by Discord ID
-    let user = await firestoreAdmin.users.findByDiscordId(userData.id)
+    // Helper function to check if Supabase is available
+    async function checkSupabaseAvailable(): Promise<boolean> {
+      try {
+        await supabaseAdmin.users.findAll()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // Use Supabase only (no Firestore fallback to avoid quota issues)
+    let user = null
+    
+    try {
+      user = await supabaseAdmin.users.findByDiscordId(userData.id)
+    } catch (supabaseError: any) {
+      // If Supabase fails, don't fallback to Firestore (hits quota)
+      // Instead, return a helpful error
+      console.error("Supabase error when looking up user by Discord ID:", supabaseError)
+      if (supabaseError?.code === '42P01' || supabaseError?.message?.includes('does not exist')) {
+        // Table doesn't exist - need to run SQL setup
+        return NextResponse.redirect(`${baseUrl}/login?error=Supabase+table+not+found.+Please+run+the+SQL+setup.`)
+      }
+      // Other Supabase error
+      throw new Error(`Supabase error: ${supabaseError?.message || supabaseError}`)
+    }
 
     // Prepare user update/create data with email
     const email = userData.email || undefined
 
     // Prepare update data that might be needed
-    const updateData: { username?: string; discordId: string; email?: string } = { discordId: userData.id }
+    const updateData: { username?: string; discordId: string; email?: string; huntmaster?: boolean } = { discordId: userData.id }
     if (email) {
       updateData.email = email
     }
@@ -118,24 +155,47 @@ export async function GET(request: NextRequest) {
     if (!user) {
       // Use the display name (global_name) for the username field
       const username = displayName
-      const existingUserByUsername = await firestoreAdmin.users.findByUsername(username)
+      let existingUserByUsername = null
+      
+      // Try Supabase only
+      try {
+        existingUserByUsername = await supabaseAdmin.users.findByUsername(username)
+      } catch (supabaseError: any) {
+        console.error("Supabase error when looking up user by username:", supabaseError)
+        // Don't fallback - just continue to create new user
+      }
 
       if (existingUserByUsername) {
         // Update existing user with Discord ID and email
-        await firestoreAdmin.users.update(existingUserByUsername.id, updateData)
-        user = { ...existingUserByUsername, ...updateData }
-        console.log("Updated existing user with Discord ID:", user.username)
+        try {
+          await supabaseAdmin.users.update(existingUserByUsername.id, updateData)
+          user = { ...existingUserByUsername, ...updateData }
+          console.log("Updated existing user with Discord ID:", user.username)
+        } catch (updateError: any) {
+          console.error("Failed to update user in Supabase:", updateError)
+          throw new Error(`Failed to update user: ${updateError?.message || updateError}`)
+        }
       } else {
         // Create new user - inactive by default (needs admin approval)
-        user = await firestoreAdmin.users.create({
-          username,
-          isAdmin: false,
-          discordId: userData.id,
-          email,
-          isActive: false, // New users are inactive until activated by admin
-          createdAt: new Date(),
-        })
-        console.log("Created new user from Discord:", user.username, email ? `with email ${email}` : "without email")
+        try {
+          user = await supabaseAdmin.users.create({
+            username,
+            isAdmin: false,
+            huntmasterAdmin: false,
+            discordId: userData.id,
+            email,
+            isActive: false, // New users are inactive until activated by admin
+            huntmaster: false, // New Discord users don't get HuntMaster access automatically
+            createdAt: new Date(),
+          })
+          console.log("Created new user in Supabase from Discord:", user.username, email ? `with email ${email}` : "without email")
+        } catch (createError: any) {
+          console.error("Failed to create user in Supabase:", createError)
+          if (createError?.code === '42P01' || createError?.message?.includes('does not exist')) {
+            return NextResponse.redirect(`${baseUrl}/login?error=Supabase+table+not+found.+Please+run+the+SQL+setup.`)
+          }
+          throw new Error(`Failed to create user: ${createError?.message || createError}`)
+        }
       }
     } else {
       // Update existing Discord user with latest display name and email if needed
@@ -155,9 +215,14 @@ export async function GET(request: NextRequest) {
       }
       
       if (needsUpdate) {
-        await firestoreAdmin.users.update(user.id, updateData)
-        user = { ...user, ...updateData }
-        console.log("Updated existing user with latest Discord info:", user.username)
+        try {
+          await supabaseAdmin.users.update(user.id, updateData)
+          user = { ...user, ...updateData }
+          console.log("Updated existing user with latest Discord info:", user.username)
+        } catch (updateError: any) {
+          console.error("Failed to update user in Supabase:", updateError)
+          throw new Error(`Failed to update user: ${updateError?.message || updateError}`)
+        }
       } else {
         console.log("Found existing user by Discord ID:", user.username, "- no updates needed")
       }
@@ -210,10 +275,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Create session with actual user data (user is active)
+    // Use huntmasterAdmin for HuntMaster admin access (separate from main app admin)
     const session = {
       userId: user.id,
       username: user.username,
-      isAdmin: user.isAdmin,
+      isAdmin: user.huntmasterAdmin ?? user.isAdmin ?? false, // Use HuntMaster admin flag
       discordId: user.discordId,
       isActive: true,
       timestamp: Date.now(),
@@ -255,8 +321,18 @@ export async function GET(request: NextRequest) {
     console.error("Discord callback error:", error)
     // Determine base URL dynamically from request headers
     const host = request.headers.get("host") || ""
-    const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https"
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`
+    const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0")
+    
+    let baseUrl: string
+    if (isLocalhost) {
+      const port = host.includes(":") ? host.split(":")[1] : "3000"
+      baseUrl = `http://localhost:${port}`
+    } else {
+      const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || ""
+      const appUrl = appUrlRaw.replace(/^["']|["']$/g, "") || undefined
+      baseUrl = appUrl || `https://${host}`
+    }
+    
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     return NextResponse.redirect(`${baseUrl}/login?error=${encodeURIComponent(errorMessage)}`)
   }

@@ -1,5 +1,26 @@
 import { NextResponse } from "next/server"
-import { firestoreAdmin } from "@/lib/firestore-admin"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+// Simple in-memory cache with TTL
+const cache = new Map<string, { data: any; timestamp: number }>()
+const CACHE_TTL = 5000 // 5 seconds
+
+function getCached(key: string) {
+  const cached = cache.get(key)
+  if (!cached) return null
+  
+  const age = Date.now() - cached.timestamp
+  if (age > CACHE_TTL) {
+    cache.delete(key)
+    return null
+  }
+  
+  return cached.data
+}
+
+function setCache(key: string, data: any) {
+  cache.set(key, { data, timestamp: Date.now() })
+}
 
 // Get slots by username (for OBS browser sources)
 export async function GET(request: Request) {
@@ -11,15 +32,22 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "Username is required" }, { status: 400 })
     }
 
+    // Check cache first
+    const cacheKey = `slots:${username}`
+    const cached = getCached(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
+    }
+
     // Find user by username
-    const user = await firestoreAdmin.users.findByUsername(username)
+    const user = await supabaseAdmin.users.findByUsername(username)
     
     if (!user) {
       return NextResponse.json({ success: false, error: "User not found" }, { status: 404 })
     }
 
     // Get slots for this user
-    const slots = await firestoreAdmin.slots.findByUserId(user.id)
+    const slots = await supabaseAdmin.slots.findByUserId(user.id)
     
     console.log(`Loaded ${slots.length} slots for user ${username} (${user.id})`)
     console.log("Slot names:", slots.map(s => s.name))
@@ -42,7 +70,12 @@ export async function GET(request: Request) {
       console.log(`Deduplicated: ${slots.length} slots -> ${uniqueSlots.length} unique slots`)
     }
 
-    return NextResponse.json({ success: true, slots: uniqueSlots })
+    const response = { success: true, slots: uniqueSlots }
+    
+    // Cache the response
+    setCache(cacheKey, response)
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error("Error fetching slots by username:", error)
     return NextResponse.json({ 

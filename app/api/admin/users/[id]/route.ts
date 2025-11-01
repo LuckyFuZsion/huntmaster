@@ -1,6 +1,31 @@
 import { NextResponse } from "next/server"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 import { firestoreAdmin } from "@/lib/firestore-admin"
 import bcrypt from "bcryptjs"
+
+async function getUserAdmin(id: string) {
+  try {
+    return await supabaseAdmin.users.findOne(id)
+  } catch {
+    return await firestoreAdmin.users.findOne(id)
+  }
+}
+
+async function updateUser(id: string, updateData: any) {
+  try {
+    await supabaseAdmin.users.update(id, updateData)
+  } catch {
+    await firestoreAdmin.users.update(id, updateData)
+  }
+}
+
+async function deleteUser(id: string) {
+  try {
+    await supabaseAdmin.users.delete(id)
+  } catch {
+    await firestoreAdmin.users.delete(id)
+  }
+}
 
 export async function PUT(request: Request) {
   try {
@@ -18,12 +43,20 @@ export async function PUT(request: Request) {
       )
     }
 
-    const { username, password, is_admin } = await request.json()
+    const { username, password, is_admin, huntmaster, huntmaster_admin } = await request.json()
 
     // Build update data
     const updateData: any = {
       username,
       isAdmin: is_admin,
+    }
+
+    // Handle HuntMaster-specific fields
+    if (huntmaster !== undefined) {
+      updateData.huntmaster = huntmaster
+    }
+    if (huntmaster_admin !== undefined) {
+      updateData.huntmasterAdmin = huntmaster_admin
     }
 
     // If password is provided, hash and update it
@@ -32,7 +65,7 @@ export async function PUT(request: Request) {
       updateData.password = hashedPassword
     }
 
-    await firestoreAdmin.users.update(id, updateData)
+    await updateUser(id, updateData)
 
     return NextResponse.json({
       success: true,
@@ -67,7 +100,7 @@ export async function DELETE(request: Request) {
     }
 
     // Check if user is admin
-    const user = await firestoreAdmin.users.findOne(id)
+    const user = await getUserAdmin(id)
 
     if (user?.username === "admin" || user?.username === process.env.ADMIN_USERNAME) {
       return NextResponse.json(
@@ -79,7 +112,7 @@ export async function DELETE(request: Request) {
       )
     }
 
-    await firestoreAdmin.users.delete(id)
+    await deleteUser(id)
 
     return NextResponse.json({
       success: true,

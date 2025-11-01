@@ -16,7 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Clipboard, FileIcon, Plus, Minus, Info, LogOut, RefreshCw } from "lucide-react"
+import { Clipboard, FileIcon, Plus, Minus, Info, LogOut, RefreshCw, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Image from "next/image"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -25,6 +25,8 @@ import { useRouter } from "next/navigation"
 // Add the import for VersionHistory
 import { VersionHistory } from "@/components/version-history"
 import SlotNameAutocomplete from "@/components/SlotNameAutocomplete"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
 
 interface Slot {
   id: string
@@ -51,11 +53,15 @@ const fontOptions = [
 interface WidgetItemProps {
   url: string
   imageSrc: string
+  title?: string
 }
 
-function WidgetItem({ url, imageSrc }: WidgetItemProps) {
+function WidgetItem({ url, imageSrc, title }: WidgetItemProps) {
   return (
     <div className="border rounded-lg p-4 space-y-2">
+      {title && (
+        <h4 className="text-sm font-semibold mb-2">{title}</h4>
+      )}
       <div style={{ position: "relative", width: "100%", paddingTop: "56.25%" }}>
         <Image
           src={imageSrc || "/placeholder.svg"}
@@ -73,26 +79,39 @@ function WidgetItem({ url, imageSrc }: WidgetItemProps) {
 export function BonusHuntTracker() {
   const [slots, setSlots] = useState<Slot[]>([])
   const [newSlot, setNewSlot] = useState({ name: "", bet: "" })
+  const [selectedGame, setSelectedGame] = useState<{ title: string; provider?: string } | null>(null)
   const [startBalance, setStartBalance] = useState("")
   const [endBalance, setEndBalance] = useState("")
+  const [balanceSavedState, setBalanceSavedState] = useState<{ start?: boolean; end?: boolean }>({})
   const slotListRef = useRef<HTMLDivElement>(null)
+  
+  // Refs for settings saving with debouncing
+  const savingSettingsRef = useRef(false)
+  const lastSavedSettingsRef = useRef<string>("") // JSON string of last saved settings
+  const saveSettingsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const settingsLoadedRef = useRef(false) // Track if settings have been loaded at least once
+  const previousSettingsRef = useRef<{ startBalance?: string; endBalance?: string } | null>(null) // Track previous balance values
+  const userEditingRef = useRef(false) // Track if user is actively editing (typing in input fields)
+  const lastUserEditRef = useRef<{ startBalance?: string; endBalance?: string } | null>(null) // Track what user last typed
+  
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null)
 
   const [isEditing, setIsEditing] = useState(false)
-  const [colourTheme, setColourTheme] = useState("blue")
+  const [colourTheme, setColourTheme] = useState("") // No default - only from database
   const [isSlotListVisible, setIsSlotListVisible] = useState(false)
-  const [selectedFont, setSelectedFont] = useState("Arial")
+  const [selectedFont, setSelectedFont] = useState("") // No default - only from database
   const [isCustomiseMenuVisible, setIsCustomiseMenuVisible] = useState(false)
   const [isSaveHuntDialogOpen, setIsSaveHuntDialogOpen] = useState(false)
   const [saveHuntName, setSaveHuntName] = useState("")
   const [isNewHuntDialogOpen, setIsNewHuntDialogOpen] = useState(false)
-  const [fontSize, setFontSize] = useState(24)
+  const [fontSize, setFontSize] = useState(0) // No default - only from database
   const [isWidgetsMenuVisible, setIsWidgetsMenuVisible] = useState(false)
   const [isInstructionsDialogOpen, setIsInstructionsDialogOpen] = useState(false)
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const [isClipboardDialogOpen, setIsClipboardDialogOpen] = useState(false)
   const [clipboardDialogContent, setClipboardDialogContent] = useState("")
+  const [isExtensionTokenDialogOpen, setIsExtensionTokenDialogOpen] = useState(false)
   const [obsSizes, setObsSizes] = useState({
     obs: "600px",
     obs2: "600px",
@@ -101,8 +120,15 @@ export function BonusHuntTracker() {
     obs5: "600px",
   })
   const [isAdmin, setIsAdmin] = useState(false)
-  const [cornerRadius, setCornerRadius] = useState("20px")
+  const [cornerRadius, setCornerRadius] = useState("") // No default - only from database
   const [isSuperBonus, setIsSuperBonus] = useState(false)
+  const [viewMode, setViewMode] = useState<"bonus-hunt" | "live-games">("bonus-hunt")
+  
+  // Live Games state
+  const [liveGame, setLiveGame] = useState({ name: "", bet: "", win: "" })
+  const [selectedLiveGame, setSelectedLiveGame] = useState<{ title: string; provider?: string } | null>(null)
+  const [isRecordingWin, setIsRecordingWin] = useState(false)
+  const [isUpdatingGame, setIsUpdatingGame] = useState(false)
 
   const noSpinnerClass =
     "appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
@@ -110,87 +136,299 @@ export function BonusHuntTracker() {
   const router = useRouter()
 
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const [canEdit, setCanEdit] = useState(false) // Blocks editing until 2 seconds after load
   const [currentUsername, setCurrentUsername] = useState("")
+  const [userId, setUserId] = useState<string | null>(null)
 
+  // Get userId from session
   useEffect(() => {
-    const loadSlotsFromFirestore = async () => {
-      try {
-        const session = localStorage.getItem("huntmaster_session")
-        if (session) {
-          const response = await fetch("/api/slots", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ session, action: "get" }),
-          })
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({
-              id: slot.id,
-              name: slot.name,
-              bet: slot.bet,
-              win: slot.win,
-            })))
-            setInitialLoadComplete(true)
-          }
-        }
-      } catch (error) {
-        console.error("Error loading slots from Firestore:", error)
-        setInitialLoadComplete(true)
-      }
-    }
-
-    // Load slots from Firestore
-    loadSlotsFromFirestore()
-
-    // Load user settings from Firestore
-    const loadUserSettings = async () => {
-      try {
-        const session = localStorage.getItem("huntmaster_session")
-        if (session) {
-          const response = await fetch("/api/user-settings", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ session, action: "get" }),
-          })
-          const data = await response.json()
-          if (data.success && data.settings) {
-            console.log("Loaded settings from Firestore:", data.settings)
-            // Load settings from Firestore - ensure strings are properly converted
-            // Explicitly handle 0 values to ensure they're preserved as "0" string
-            setStartBalance(data.settings.startBalance != null && data.settings.startBalance !== "" ? String(data.settings.startBalance) : "")
-            setEndBalance(data.settings.endBalance != null && data.settings.endBalance !== "" ? String(data.settings.endBalance) : "")
-            setColourTheme(data.settings.colourTheme || "blue")
-            setSelectedFont(data.settings.selectedFont || "Arial")
-            setFontSize(data.settings.fontSize || 24)
-            setCornerRadius(data.settings.cornerRadius || "20px")
-            return
-          }
-        }
-      } catch (error) {
-        console.error("Error loading user settings:", error)
-      }
-      // No localStorage fallback - each user should have their own settings in Firestore
-    }
-
-    loadUserSettings()
-
-    // Check if user is admin and get username
     const session = localStorage.getItem("huntmaster_session")
     if (session) {
       try {
         const sessionData = JSON.parse(decrypt(session))
+        setUserId(sessionData.userId || null)
         setIsAdmin(sessionData.isAdmin)
         setCurrentUsername(sessionData.username)
       } catch (err) {
-        console.error("Error checking admin status:", err)
+        console.error("Error parsing session:", err)
+        setUserId(null)
         setIsAdmin(false)
       }
+    } else {
+      setUserId(null)
     }
   }, [])
+
+  // Use real-time subscriptions instead of polling
+  const { slots: realtimeSlots, loading: slotsLoading, error: slotsError } = useSupabaseSlots(userId)
+  const { settings, loading: settingsLoading } = useSupabaseUserSettings(userId)
+
+  // Update slots state when real-time data changes
+  useEffect(() => {
+    if (realtimeSlots) {
+      // Deduplicate slots by ID and name as a safeguard
+      const mappedSlots = realtimeSlots.map((slot: any) => ({
+        id: slot.id,
+        name: slot.name,
+        bet: slot.bet,
+        win: slot.win,
+      }))
+      
+      // Deduplicate by ID and name
+      const seenIds = new Set<string>()
+      const seenNames = new Map<string, typeof mappedSlots[0]>()
+      const uniqueSlots = mappedSlots.filter((slot) => {
+        // Check by ID
+        if (seenIds.has(slot.id)) {
+          console.log('Duplicate slot ID in tracker:', slot.id, slot.name)
+          return false
+        }
+        seenIds.add(slot.id)
+        
+        // Check by name (case-insensitive)
+        const nameKey = slot.name.toLowerCase().trim()
+        if (seenNames.has(nameKey)) {
+          console.log('Duplicate slot name in tracker:', slot.name)
+          return false
+        }
+        seenNames.set(nameKey, slot)
+        
+        return true
+      })
+      
+      if (uniqueSlots.length !== mappedSlots.length) {
+        console.log(`Deduplicated in tracker: ${mappedSlots.length} -> ${uniqueSlots.length} slots`)
+      }
+      
+      setSlots(uniqueSlots)
+      if (!initialLoadComplete) {
+        setInitialLoadComplete(true)
+        // Wait 2 seconds after initial load before allowing edits
+        setTimeout(() => {
+          setCanEdit(true)
+          console.log("Initial load complete - editing now enabled")
+        }, 2000)
+      }
+    } else if (!slotsLoading && initialLoadComplete === false) {
+      // Mark as complete even if no slots (empty state)
+      setSlots([])
+      setInitialLoadComplete(true)
+      // Wait 2 seconds after initial load before allowing edits
+      setTimeout(() => {
+        setCanEdit(true)
+        console.log("Initial load complete (no slots) - editing now enabled")
+      }, 2000)
+    }
+
+    // Check for quota errors
+    if (slotsError && slotsError.message?.includes("quota")) {
+      console.error("Database quota exceeded:", slotsError.message)
+      alert("Database quota exceeded. Please check your Supabase plan or wait for quota reset.")
+    }
+  }, [realtimeSlots, slotsLoading, slotsError, initialLoadComplete])
+
+  // Update settings state when real-time data changes
+  useEffect(() => {
+    if (settings) {
+      console.log("Loaded settings from database:", settings)
+      
+      // DASHBOARD PROTECTION: If user is actively editing, ignore real-time updates for balances
+      // The dashboard is read-write for the logged-in user - external changes shouldn't overwrite user input
+      if (userEditingRef.current && lastUserEditRef.current) {
+        // User is editing - preserve their current input, ignore real-time update
+        console.log("User is editing, ignoring real-time balance update to preserve user input")
+        // Only update other settings (theme, font, etc.) but keep balances as user typed them
+        const protectedStartBalance = lastUserEditRef.current.startBalance || startBalance
+        const protectedEndBalance = lastUserEditRef.current.endBalance || endBalance
+        
+        // Update other settings but preserve user's balance input
+        // Only set values from database, no defaults
+        if (settings.colourTheme) setColourTheme(settings.colourTheme)
+        if (settings.selectedFont) setSelectedFont(settings.selectedFont)
+        if (settings.fontSize) setFontSize(settings.fontSize)
+        if (settings.cornerRadius) setCornerRadius(settings.cornerRadius)
+        
+        // Don't update balances - user is editing them
+        previousSettingsRef.current = {
+          startBalance: protectedStartBalance,
+          endBalance: protectedEndBalance
+        }
+        
+        // Update lastSavedSettingsRef to match current user input (will be saved when they finish)
+        const loadedSettingsJson = JSON.stringify({
+          colourTheme: settings.colourTheme || "blue",
+          selectedFont: settings.selectedFont || "Arial",
+          fontSize: settings.fontSize || 24,
+          cornerRadius: settings.cornerRadius || "20px",
+          startBalance: protectedStartBalance,
+          endBalance: protectedEndBalance,
+        })
+        lastSavedSettingsRef.current = loadedSettingsJson
+        
+        return // Don't update balances while user is editing
+      }
+      
+      // PROTECTION: Only preserve values if:
+      // 1. We're past initial load (canEdit = true means we've loaded and displayed values)
+      // 2. We previously had a value
+      // 3. The new update explicitly has null/empty (not just missing from payload)
+      // This prevents false positives during initial load when state might be empty
+      let protectedStartBalance = settings.startBalance
+      let protectedEndBalance = settings.endBalance
+      
+      // Only apply protection after initial load is complete and editing is enabled
+      // Before that, trust the database completely
+      if (canEdit && initialLoadComplete && previousSettingsRef.current) {
+        const prevHadStart = previousSettingsRef.current.startBalance != null && previousSettingsRef.current.startBalance !== ""
+        const prevHadEnd = previousSettingsRef.current.endBalance != null && previousSettingsRef.current.endBalance !== ""
+        
+        // Check if the new settings explicitly have null/empty (not just undefined)
+        // If the field exists in the settings object but is null/empty, it's an explicit clear
+        const hasStartBalanceField = Object.prototype.hasOwnProperty.call(settings, 'startBalance')
+        const hasEndBalanceField = Object.prototype.hasOwnProperty.call(settings, 'endBalance')
+        const currStartEmpty = hasStartBalanceField && (settings.startBalance == null || settings.startBalance === "")
+        const currEndEmpty = hasEndBalanceField && (settings.endBalance == null || settings.endBalance === "")
+        
+        // Only protect if: we had a value AND the update explicitly tries to clear it
+        // Don't protect if the field is just missing from the update (partial update)
+        if (prevHadStart && currStartEmpty) {
+          console.warn("Real-time update tried to clear startBalance, preserving previous value:", previousSettingsRef.current.startBalance)
+          protectedStartBalance = previousSettingsRef.current.startBalance
+        }
+        if (prevHadEnd && currEndEmpty) {
+          console.warn("Real-time update tried to clear endBalance, preserving previous value:", previousSettingsRef.current.endBalance)
+          protectedEndBalance = previousSettingsRef.current.endBalance
+        }
+      }
+      
+      // Preserve balance values from database exactly as they are (or protected values)
+      // Important: "0" is a valid value, don't filter it out!
+      // Convert null/undefined to empty string only if we don't have an existing value
+      // Otherwise preserve existing state to prevent clearing on page load
+      const loadedStartBalance = protectedStartBalance != null && protectedStartBalance !== "" 
+        ? String(protectedStartBalance) 
+        : (startBalance || "") // Preserve existing state if database value is null/empty
+      const loadedEndBalance = protectedEndBalance != null && protectedEndBalance !== "" 
+        ? String(protectedEndBalance) 
+        : (endBalance || "") // Preserve existing state if database value is null/empty
+      
+      // Only update previous settings reference AFTER initial load is complete
+      // This prevents false protection triggers during initial load
+      // On page refresh, previousSettingsRef starts as null, so we trust the database
+      if (canEdit && initialLoadComplete) {
+        // Only set previousSettingsRef if we actually have values to protect
+        // Don't store empty strings as "previous" values
+        if (loadedStartBalance || loadedEndBalance) {
+          previousSettingsRef.current = {
+            startBalance: loadedStartBalance,
+            endBalance: loadedEndBalance
+          }
+        }
+      }
+      
+      console.log("Setting balances from loaded settings:", { 
+        rawStartBalance: settings.startBalance,
+        protectedStartBalance,
+        rawEndBalance: settings.endBalance,
+        protectedEndBalance,
+        loadedStartBalance, 
+        loadedEndBalance,
+        currentStartBalance: startBalance,
+        currentEndBalance: endBalance,
+        startBalanceType: typeof settings.startBalance,
+        endBalanceType: typeof settings.endBalance
+      })
+      
+      // CRITICAL: Update lastSavedSettingsRef BEFORE updating state
+      // This prevents the save effect from seeing a "change" when settings load
+      // Use only values from database, no defaults
+      const loadedSettingsJson = JSON.stringify({
+        colourTheme: settings.colourTheme || "",
+        selectedFont: settings.selectedFont || "",
+        fontSize: settings.fontSize || 0,
+        cornerRadius: settings.cornerRadius || "",
+        startBalance: loadedStartBalance,
+        endBalance: loadedEndBalance,
+      })
+      lastSavedSettingsRef.current = loadedSettingsJson
+      settingsLoadedRef.current = true
+      console.log("Settings loaded from database, waiting for canEdit before displaying. Loaded values:", {
+        loadedStartBalance,
+        loadedEndBalance,
+        colourTheme: settings.colourTheme,
+        selectedFont: settings.selectedFont,
+        fontSize: settings.fontSize,
+        cornerRadius: settings.cornerRadius,
+        initialLoadComplete,
+        canEdit
+      })
+      
+      // Settings will be applied when canEdit becomes true (see useEffect below)
+      // Do NOT apply settings here - wait for 2 second delay
+    } else if (!settingsLoading && !settingsLoadedRef.current) {
+      // No settings found in database - initialize with empty values
+      // Do NOT prepopulate with defaults - only use what's in database
+      const emptySettingsJson = JSON.stringify({
+        colourTheme: "",
+        selectedFont: "",
+        fontSize: 0,
+        cornerRadius: "",
+        startBalance: "",
+        endBalance: "",
+      })
+      lastSavedSettingsRef.current = emptySettingsJson
+      settingsLoadedRef.current = true
+      console.log("No settings found in database, initialized with empty values - waiting for database data only")
+    }
+  }, [settings, settingsLoading, initialLoadComplete, canEdit]) // Depend on canEdit to apply settings when ready
+
+  // Apply loaded settings when canEdit becomes true
+  useEffect(() => {
+    if (canEdit && initialLoadComplete && settings && settingsLoadedRef.current) {
+      console.log("canEdit is now true - applying loaded settings from database")
+      // Only update balances if user is not currently editing
+      if (!userEditingRef.current) {
+        // Only update if database has a non-null, non-empty value
+        // Preserve existing state if database value is null/undefined/empty
+        if (settings.startBalance != null && settings.startBalance !== "") {
+          const loadedStartBalance = String(settings.startBalance)
+          setStartBalance(loadedStartBalance)
+          console.log("Updated startBalance from database:", loadedStartBalance)
+        } else {
+          console.log("Database startBalance is null/empty, preserving existing state:", startBalance)
+        }
+        
+        if (settings.endBalance != null && settings.endBalance !== "") {
+          const loadedEndBalance = String(settings.endBalance)
+          setEndBalance(loadedEndBalance)
+          console.log("Updated endBalance from database:", loadedEndBalance)
+        } else {
+          console.log("Database endBalance is null/empty, preserving existing state:", endBalance)
+        }
+        
+        // Initialize previousSettingsRef ONLY when we first apply values after canEdit is true
+        // This establishes the baseline for protection, but only after initial load
+        if (!previousSettingsRef.current) {
+          const currentStart = settings.startBalance != null && settings.startBalance !== "" 
+            ? String(settings.startBalance) 
+            : startBalance || ""
+          const currentEnd = settings.endBalance != null && settings.endBalance !== "" 
+            ? String(settings.endBalance) 
+            : endBalance || ""
+          previousSettingsRef.current = {
+            startBalance: currentStart,
+            endBalance: currentEnd
+          }
+          console.log("Initialized previousSettingsRef with database values after canEdit enabled:", previousSettingsRef.current)
+        }
+      }
+      // Only set values from database - no defaults, no prepopulating
+      if (settings.colourTheme) setColourTheme(settings.colourTheme)
+      if (settings.selectedFont) setSelectedFont(settings.selectedFont)
+      if (settings.fontSize) setFontSize(settings.fontSize)
+      if (settings.cornerRadius) setCornerRadius(settings.cornerRadius)
+    }
+  }, [canEdit, initialLoadComplete, settings, startBalance, endBalance])
 
   useEffect(() => {
     const savedSizes = localStorage.getItem("obsSizes")
@@ -199,73 +437,185 @@ export function BonusHuntTracker() {
     }
   }, [])
 
-  // Save slots to Firestore whenever they change (but not on initial load)
+  // Save slots to database whenever they change (but not on initial load)
+  // Use refs to prevent loops and debounce saves
+  const savingRef = useRef(false)
+  const lastSavedSlotsRef = useRef<string>("") // JSON string of last saved slots
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
   useEffect(() => {
     if (!initialLoadComplete) {
       return // Don't save during initial load
     }
+    
+    // Deduplicate slots before comparing/saving
+    const seenIds = new Set<string>()
+    const seenNames = new Map<string, Slot>()
+    const uniqueSlots = slots.filter((slot) => {
+      if (seenIds.has(slot.id)) return false
+      seenIds.add(slot.id)
+      const nameKey = slot.name.toLowerCase().trim()
+      if (seenNames.has(nameKey)) return false
+      seenNames.set(nameKey, slot)
+      return true
+    })
+    
+    // Only save if slots actually changed (by comparing JSON)
+    const currentSlotsJson = JSON.stringify(uniqueSlots.map(s => ({ id: s.id, name: s.name, bet: s.bet, win: s.win })))
+    if (currentSlotsJson === lastSavedSlotsRef.current) {
+      return // No changes, skip save
+    }
 
-    const saveSlotsToFirestore = async () => {
-      try {
-        const session = localStorage.getItem("huntmaster_session")
-        if (session && slots.length >= 0) {
-          const response = await fetch("/api/slots", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ session, action: "save", slots }),
-          })
-          const data = await response.json()
-          // Update slots with Firestore IDs only if we have temporary IDs
-          // This prevents infinite loops from setSlots triggering the useEffect
-          if (data.success && data.slots) {
-            // Check if we need to update (i.e., if any slot has a temporary Date.now() ID)
-            const hasTempIds = slots.some(slot => slot.id.length > 20) // Firestore IDs are shorter
-            if (hasTempIds) {
-              setSlots(data.slots.map((slot: any) => ({
-                id: slot.id,
-                name: slot.name,
-                bet: slot.bet,
-                win: slot.win,
-              })))
+    if (savingRef.current) {
+      return // Already saving, skip to prevent loops
+    }
+
+    // Debounce saves - wait 1 second after last change before saving
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      const saveSlotsToFirestore = async () => {
+        savingRef.current = true
+        try {
+          const session = localStorage.getItem("huntmaster_session")
+          if (!session) {
+            console.warn("No session found, cannot save slots")
+            savingRef.current = false
+            return
+          }
+          
+          // Only save if we have slots (prevent accidental deletion of all data)
+          if (uniqueSlots.length > 0) {
+            console.log("Saving slots to database:", uniqueSlots.length, "unique slots")
+            
+            const response = await fetch("/api/slots", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ session, action: "save", slots: uniqueSlots }),
+            })
+            
+            if (!response.ok) {
+              console.error("Failed to save slots. Status:", response.status)
+              savingRef.current = false
+              return
+            }
+            
+            const data = await response.json()
+            
+            // Check for quota errors
+            if (!data.success && data.error && (data.error.includes("quota") || data.error.includes("resource exhausted"))) {
+              console.error("Database quota exceeded:", data.error)
+              alert("Database quota exceeded. Unable to save. Please check your Supabase plan.")
+              savingRef.current = false
+              return
+            }
+            
+            // Update last saved reference
+            if (data.success && data.slots) {
+              lastSavedSlotsRef.current = JSON.stringify(data.slots.map((s: any) => ({ id: s.id, name: s.name, bet: s.bet, win: s.win })))
+              
+              // Only update state if there are actual differences (temporary IDs or count change)
+              const hasTempIds = uniqueSlots.some(slot => slot.id.length <= 15)
+              const slotCountChanged = data.slots.length !== uniqueSlots.length
+              if (hasTempIds || slotCountChanged) {
+                // Deduplicate before setting state
+                const seen = new Set<string>()
+                const deduplicated = data.slots.filter((slot: any) => {
+                  if (seen.has(slot.id)) return false
+                  seen.add(slot.id)
+                  return true
+                }).map((slot: any) => ({
+                  id: slot.id,
+                  name: slot.name,
+                  bet: slot.bet,
+                  win: slot.win,
+                }))
+                setSlots(deduplicated)
+              }
             }
           }
+        } catch (error) {
+          console.error("Error saving slots:", error)
+        } finally {
+          savingRef.current = false
         }
-      } catch (error) {
-        console.error("Error saving slots to Firestore:", error)
+      }
+
+      saveSlotsToFirestore()
+    }, 1000) // Wait 1 second after last change
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
       }
     }
-
-    saveSlotsToFirestore()
   }, [slots, initialLoadComplete])
 
-  // Save settings to Firestore and localStorage
+  // Save settings to database with debouncing and change detection
   useEffect(() => {
-    if (!initialLoadComplete) {
-      return // Don't save during initial load
+    // Don't save if:
+    // 1. Initial load not complete
+    // 2. Settings still loading
+    // 3. Settings haven't been loaded at least once (prevents saving empty values before load)
+    if (!initialLoadComplete || settingsLoading || !settingsLoadedRef.current) {
+      console.log("Skipping save - waiting for settings to load:", {
+        initialLoadComplete,
+        settingsLoading,
+        settingsLoaded: settingsLoadedRef.current
+      })
+      return // Don't save during initial load, while loading, or before first load completes
     }
 
-    // Save to Firestore
-    const saveSettingsToFirestore = async () => {
-      // Build settings payload, only include balances when set to avoid overwriting with empty values
-      const settingsToSave: Record<string, any> = {
-        colourTheme,
-        selectedFont,
-        fontSize,
-        cornerRadius,
-      }
-      if (startBalance !== "" && startBalance !== null && startBalance !== undefined) {
-        settingsToSave.startBalance = startBalance
-      }
-      if (endBalance !== "" && endBalance !== null && endBalance !== undefined) {
-        settingsToSave.endBalance = endBalance
-      }
-      console.log("Saving settings to Firestore:", settingsToSave)
-      try {
-        const session = localStorage.getItem("huntmaster_session")
-        if (session) {
-          await fetch("/api/user-settings", {
+    // Build settings payload - only include values that exist (from database)
+    // Don't save empty defaults - only save what user actually set or what came from database
+    // NOTE: Balances are NOT auto-saved - they must be saved manually via tick button
+    const settingsToSave: Record<string, any> = {}
+    if (colourTheme) settingsToSave.colourTheme = colourTheme
+    if (selectedFont) settingsToSave.selectedFont = selectedFont
+    if (fontSize) settingsToSave.fontSize = fontSize
+    if (cornerRadius) settingsToSave.cornerRadius = cornerRadius
+    
+    // Balances are NOT included in auto-save - they must be saved manually via tick button
+
+    // Only save if settings actually changed (by comparing JSON)
+    const currentSettingsJson = JSON.stringify(settingsToSave)
+    if (currentSettingsJson === lastSavedSettingsRef.current) {
+      console.log("Settings unchanged, skipping save")
+      return // No changes, skip save
+    }
+    
+    console.log("Settings changed, preparing to save:", {
+      current: settingsToSave,
+      lastSaved: lastSavedSettingsRef.current ? JSON.parse(lastSavedSettingsRef.current) : "none"
+    })
+
+    if (savingSettingsRef.current) {
+      return // Already saving, skip to prevent loops
+    }
+
+    // Debounce saves - wait 1 second after last change before saving
+    if (saveSettingsTimeoutRef.current) {
+      clearTimeout(saveSettingsTimeoutRef.current)
+    }
+    
+    saveSettingsTimeoutRef.current = setTimeout(() => {
+      const saveSettingsToDatabase = async () => {
+        savingSettingsRef.current = true
+        try {
+          const session = localStorage.getItem("huntmaster_session")
+          if (!session) {
+            console.warn("No session found, cannot save settings")
+            savingSettingsRef.current = false
+            return
+          }
+          
+          console.log("Saving settings to database:", settingsToSave)
+          
+          const response = await fetch("/api/user-settings", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -276,17 +626,94 @@ export function BonusHuntTracker() {
               settings: settingsToSave,
             }),
           })
+          
+          if (!response.ok) {
+            console.error("Failed to save settings. Status:", response.status)
+            const errorText = await response.text()
+            console.error("Error response:", errorText)
+            savingSettingsRef.current = false
+            return
+          }
+          
+          const data = await response.json()
+          
+          // Check for quota errors
+          if (!data.success && data.error && (data.error.includes("quota") || data.error.includes("resource exhausted"))) {
+            console.error("Database quota exceeded:", data.error)
+            alert("Database quota exceeded. Unable to save settings. Please check your Supabase plan.")
+            savingSettingsRef.current = false
+            return
+          }
+          
+          // Update last saved reference on success
+          if (data.success) {
+            lastSavedSettingsRef.current = currentSettingsJson
+            // NOTE: Balances are NOT updated here - they are only saved via tick button
+            console.log("Settings saved successfully by dashboard user:", settingsToSave)
+            if (data.settings) {
+              console.log("Verified saved settings from DB:", data.settings)
+            }
+          } else {
+            console.error("Settings save failed:", data.error)
+            alert(`Failed to save settings: ${data.error || "Unknown error"}`)
+          }
+        } catch (error) {
+          console.error("Error saving settings:", error)
+        } finally {
+          savingSettingsRef.current = false
         }
-      } catch (error) {
-        console.error("Error saving settings to Firestore:", error)
+      }
+
+      saveSettingsToDatabase()
+    }, 1000) // Wait 1 second after last change
+    
+    // Save immediately when component unmounts (navigation away) to ensure changes are saved
+    // NOTE: Balances are NOT saved on unmount - they must be saved manually via tick button
+    return () => {
+      if (saveSettingsTimeoutRef.current) {
+        // Clear the timeout
+        clearTimeout(saveSettingsTimeoutRef.current)
+        saveSettingsTimeoutRef.current = null
+        
+        // If there are unsaved changes and we're not already saving, save them now
+        // EXCLUDE balances - they are only saved via tick button, never auto-saved
+        const currentSettings: Record<string, any> = {
+          colourTheme,
+          selectedFont,
+          fontSize,
+          cornerRadius,
+          // startBalance and endBalance are INTENTIONALLY excluded - only saved via tick button
+        }
+        const currentJson = JSON.stringify(currentSettings)
+        
+        if (savingSettingsRef.current === false && currentJson !== lastSavedSettingsRef.current) {
+          const session = localStorage.getItem("huntmaster_session")
+          if (session) {
+            console.log("Saving pending settings on unmount (excluding balances):", currentSettings)
+            // Fire and forget - try to save before unmount
+            fetch("/api/user-settings", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                session,
+                action: "save",
+                settings: currentSettings,
+              }),
+            }).catch(err => console.error("Error saving on unmount:", err))
+          }
+        }
       }
     }
-
-    saveSettingsToFirestore()
-  }, [startBalance, endBalance, colourTheme, selectedFont, fontSize, cornerRadius, initialLoadComplete])
+  }, [colourTheme, selectedFont, fontSize, cornerRadius, initialLoadComplete, settingsLoading])
 
   const handleAddSlot = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canEdit) {
+      console.log("Editing disabled - waiting for initial load to complete")
+      return
+    }
     if (newSlot.name && newSlot.bet) {
       // If super bonus is checked, append "(S)" to the slot name
       const slotName = isSuperBonus ? `${newSlot.name} (S)` : newSlot.name
@@ -296,10 +723,12 @@ export function BonusHuntTracker() {
         { id: Date.now().toString(), name: slotName, bet: Number.parseFloat(newSlot.bet), win: null },
       ])
       setNewSlot({ name: "", bet: "" })
+      setSelectedGame(null) // Clear selected game after adding slot
       // Reset the super bonus toggle after adding a slot
       setIsSuperBonus(false)
     }
   }
+
 
   const handleEditSlot = (slot: Slot) => {
     setEditingSlot(slot)
@@ -331,7 +760,7 @@ export function BonusHuntTracker() {
       setIsDeleteDialogOpen(false)
       setEditingSlot(null)
       
-      // Explicitly save to Firestore to ensure deletion persists
+      // Explicitly save to database to ensure deletion persists
       try {
         const session = localStorage.getItem("huntmaster_session")
         if (session) {
@@ -474,10 +903,11 @@ ${slotListInfo}`
   }
 
   const confirmNewHunt = async () => {
-    // Clear slots from Firestore for this user
+    // Clear all hunt-related data from database for this user
     try {
       const session = localStorage.getItem("huntmaster_session")
       if (session) {
+        // Clear slots from database
         await fetch("/api/slots", {
           method: "POST",
           headers: {
@@ -485,7 +915,8 @@ ${slotListInfo}`
           },
           body: JSON.stringify({ session, action: "save", slots: [] }),
         })
-        // Clear settings in Firestore
+        
+        // Clear balances in settings (keep other preferences)
         await fetch("/api/user-settings", {
           method: "POST",
           headers: {
@@ -504,15 +935,55 @@ ${slotListInfo}`
             },
           }),
         })
+        
+        // Clear current game ("now playing")
+        await fetch("/api/current-game/set", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session,
+            gameTitle: "",
+            provider: "",
+          }),
+        })
+        
+        console.log("Successfully cleared all hunt data: slots, balances, and current game")
       }
     } catch (error) {
       console.error("Error clearing hunt data:", error)
+      alert("Error clearing hunt data. Please try again.")
+      return
     }
     
+    // Clear local state
     setSlots([])
     setStartBalance("")
     setEndBalance("")
     setNewSlot({ name: "", bet: "" })
+    
+    // Save empty balances to database
+    const session = localStorage.getItem("huntmaster_session")
+    if (session) {
+      fetch("/api/user-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session,
+          action: "save",
+          settings: {
+            startBalance: "",
+            endBalance: "",
+          },
+        }),
+      }).catch((error) => {
+        console.error("Error clearing balances:", error)
+      })
+    }
+    
     setIsNewHuntDialogOpen(false)
   }
 
@@ -538,12 +1009,12 @@ ${slotListInfo}`
 
   const handleColourThemeChange = (value: string) => {
     setColourTheme(value)
-    localStorage.setItem("colourTheme", value)
+    // Settings saved to database automatically via debounced save effect
   }
 
   const handleFontChange = (value: string) => {
     setSelectedFont(value)
-    localStorage.setItem("selectedFont", value)
+    // Settings saved to database automatically via debounced save effect
   }
 
   const handleOpenInstructions = () => {
@@ -562,7 +1033,184 @@ ${slotListInfo}`
 
   const handleRadiusChange = (value: string) => {
     setCornerRadius(value)
-    localStorage.setItem("cornerRadius", value)
+    // Settings saved to database automatically via debounced save effect
+  }
+
+  // Function to save balances when tick button is clicked
+  const handleSaveBalance = async (balanceType: "start" | "end") => {
+    if (!canEdit) return
+    
+    const session = localStorage.getItem("huntmaster_session")
+    if (!session) {
+      alert("No session found. Please log in again.")
+      return
+    }
+    
+    const settingsToSave: Record<string, any> = {}
+    // Always send a string value (never null/undefined) - empty string is valid to clear
+    if (balanceType === "start") {
+      const value = startBalance ?? ""
+      // Ensure we never send null - convert to empty string
+      settingsToSave.startBalance = value === null ? "" : String(value)
+    } else {
+      const value = endBalance ?? ""
+      // Ensure we never send null - convert to empty string
+      settingsToSave.endBalance = value === null ? "" : String(value)
+    }
+    
+    try {
+      const response = await fetch("/api/user-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session,
+          action: "save",
+          settings: settingsToSave,
+        }),
+      })
+      
+      if (!response.ok) {
+        throw new Error("Failed to save balance")
+      }
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        // Update previous settings ref to match what we just saved
+        if (!previousSettingsRef.current) {
+          previousSettingsRef.current = {}
+        }
+        if (balanceType === "start") {
+          previousSettingsRef.current.startBalance = startBalance || ""
+          setBalanceSavedState({ ...balanceSavedState, start: true })
+          // Reset green state after 2 seconds
+          setTimeout(() => {
+            setBalanceSavedState((prev) => ({ ...prev, start: false }))
+          }, 2000)
+        } else {
+          previousSettingsRef.current.endBalance = endBalance || ""
+          setBalanceSavedState({ ...balanceSavedState, end: true })
+          // Reset green state after 2 seconds
+          setTimeout(() => {
+            setBalanceSavedState((prev) => ({ ...prev, end: false }))
+          }, 2000)
+        }
+        console.log(`Balance saved successfully:`, balanceType, settingsToSave)
+      } else {
+        throw new Error(data.error || "Unknown error")
+      }
+    } catch (error) {
+      console.error(`Error saving ${balanceType} balance:`, error)
+      alert(`Failed to save ${balanceType === "start" ? "start" : "end"} balance. Please try again.`)
+    }
+  }
+
+  // Live Games handlers
+  const handleUpdateNowPlaying = async () => {
+    if (!selectedLiveGame) return
+    
+    const session = localStorage.getItem("huntmaster_session")
+    if (!session) {
+      alert("Please log in first")
+      return
+    }
+    
+    setIsUpdatingGame(true)
+    try {
+      const response = await fetch("/api/current-game/set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session,
+          gameTitle: selectedLiveGame.title.trim(),
+          provider: selectedLiveGame.provider?.trim() || undefined,
+        }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        alert(`✓ Now Playing updated to: ${selectedLiveGame.title}`)
+      } else {
+        alert(`Failed to update: ${data.error || "Unknown error"}`)
+      }
+    } catch (error) {
+      console.error("Error updating current game:", error)
+      alert("Failed to update current game. Please try again.")
+    } finally {
+      setIsUpdatingGame(false)
+    }
+  }
+
+  const handleRecordLiveWin = async () => {
+    if (!liveGame.name || !liveGame.bet || !liveGame.win) {
+      alert("Please fill in game name, stake, and win amount")
+      return
+    }
+
+    const session = localStorage.getItem("huntmaster_session")
+    if (!session) {
+      alert("Please log in first")
+      return
+    }
+
+    const bet = parseFloat(liveGame.bet)
+    const winAmount = parseFloat(liveGame.win)
+
+    if (isNaN(bet) || bet < 0 || isNaN(winAmount) || winAmount < 0) {
+      alert("Please enter valid numbers for stake and win")
+      return
+    }
+
+    setIsRecordingWin(true)
+    try {
+      // Record the win
+      const recordResponse = await fetch("/api/user-wins/record", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session,
+          gameTitle: liveGame.name.trim(),
+          bet: bet,
+          winAmount: winAmount,
+          provider: selectedLiveGame?.provider?.trim() || undefined,
+        }),
+      })
+
+      const recordData = await recordResponse.json()
+
+      if (!recordData.success) {
+        alert(`Failed to record win: ${recordData.error || "Unknown error"}`)
+        return
+      }
+
+      // Update current game to extension
+      if (selectedLiveGame) {
+        const updateResponse = await fetch("/api/current-game/set", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session,
+            gameTitle: selectedLiveGame.title.trim(),
+            provider: selectedLiveGame.provider?.trim() || undefined,
+          }),
+        })
+        await updateResponse.json() // Don't block on this
+      }
+
+      // Clear win amount, keep game and stake
+      setLiveGame({ ...liveGame, win: "" })
+      alert(`Win recorded! ${winAmount} (${bet > 0 ? (winAmount / bet).toFixed(2) : "0"}x)`)
+    } catch (error) {
+      console.error("Error recording win:", error)
+      alert("Failed to record win. Please try again.")
+    } finally {
+      setIsRecordingWin(false)
+    }
   }
 
   return (
@@ -570,32 +1218,103 @@ ${slotListInfo}`
       <Card className="w-full">
         <CardContent className="p-4 pt-1">
           <div className="space-y-4">
+            {/* View Toggle */}
+            <div className="flex gap-2 mb-2">
+              <Button
+                type="button"
+                variant={viewMode === "bonus-hunt" ? "default" : "outline"}
+                onClick={() => setViewMode("bonus-hunt")}
+                className="flex-1"
+              >
+                Bonus Hunt
+              </Button>
+              <Button
+                type="button"
+                variant={viewMode === "live-games" ? "default" : "outline"}
+                onClick={() => setViewMode("live-games")}
+                className="flex-1"
+              >
+                Live Games
+              </Button>
+            </div>
+
+            {viewMode === "bonus-hunt" ? (
+              <>
             <div className="flex flex-row space-x-2">
-              <Input
-                type="number"
-                placeholder="Start Balance"
-                value={startBalance}
-                onChange={(e) => setStartBalance(e.target.value)}
-                className={`w-1/2 ${noSpinnerClass}`}
-              />
-              <Input
-                type="number"
-                placeholder="End Balance"
-                value={endBalance}
-                onChange={(e) => {
-                  const val = e.target.value
-                  // Preserve "0" explicitly - if user enters 0, keep it as "0" string
-                  setEndBalance(val === "" ? "" : val)
-                }}
-                className={`w-1/2 ${noSpinnerClass}`}
-              />
+              <div className="flex flex-row space-x-1 w-1/2">
+                <Input
+                  type="number"
+                  placeholder="Start Balance"
+                  value={startBalance}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    if (canEdit) {
+                      const val = e.target.value
+                      setStartBalance(val)
+                    }
+                  }}
+                  className={`flex-1 ${noSpinnerClass}`}
+                />
+                <Button
+                  type="button"
+                  variant={balanceSavedState.start ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => handleSaveBalance("start")}
+                  disabled={!canEdit}
+                  className={`h-10 w-10 flex-shrink-0 ${
+                    balanceSavedState.start ? "bg-green-600 hover:bg-green-700 text-white" : ""
+                  }`}
+                  title="Save start balance"
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex flex-row space-x-1 w-1/2">
+                <Input
+                  type="number"
+                  placeholder="End Balance"
+                  value={endBalance}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    if (canEdit) {
+                      const val = e.target.value
+                      setEndBalance(val === "" ? "" : val)
+                    }
+                  }}
+                  className={`flex-1 ${noSpinnerClass}`}
+                />
+                <Button
+                  type="button"
+                  variant={balanceSavedState.end ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => handleSaveBalance("end")}
+                  disabled={!canEdit}
+                  className={`h-10 w-10 flex-shrink-0 ${
+                    balanceSavedState.end ? "bg-green-600 hover:bg-green-700 text-white" : ""
+                  }`}
+                  title="Save end balance"
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <form onSubmit={handleAddSlot} className="flex flex-col space-y-2">
               <SlotNameAutocomplete
                 value={newSlot.name}
-                onChange={(v) => setNewSlot({ ...newSlot, name: v })}
+                disabled={!canEdit}
+                onChange={(v) => {
+                  if (canEdit) {
+                    setNewSlot({ ...newSlot, name: v })
+                    // Clear selected game if user manually types
+                    if (!v) setSelectedGame(null)
+                  }
+                }}
                 onSelect={(item) => {
-                  setNewSlot({ ...newSlot, name: item.title })
+                  if (canEdit) {
+                    setNewSlot({ ...newSlot, name: item.title })
+                    // Store the selected game with provider for updating current game
+                    setSelectedGame({ title: item.title, provider: item.provider })
+                  }
                 }}
                 placeholder="Slot Name"
               />
@@ -605,7 +1324,12 @@ ${slotListInfo}`
                   step="0.01"
                   placeholder="Bet Size"
                   value={newSlot.bet}
-                  onChange={(e) => setNewSlot({ ...newSlot, bet: e.target.value })}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    if (canEdit) {
+                      setNewSlot({ ...newSlot, bet: e.target.value })
+                    }
+                  }}
                   className={`flex-1 ${noSpinnerClass}`}
                 />
                 <div className="flex items-center space-x-1">
@@ -619,12 +1343,12 @@ ${slotListInfo}`
                   </Button>
                 </div>
               </div>
-              <Button type="submit">Add Slot</Button>
+              <Button type="submit" className="w-full">Add Slot</Button>
               <Button onClick={() => toggleMenu("slotList")} className="w-full mt-2">
                 {activeMenu === "slotList" ? "Hide Slotlist" : "View Slotlist"}
               </Button>
               <Button onClick={() => toggleMenu("customise")} className="w-full mt-2">
-                {activeMenu === "customise" ? "Hide Customise Menu" : "Customise Overlay Sizes"}
+                {activeMenu === "customise" ? "Hide OBS Overlays" : "OBS Overlays"}
               </Button>
               <Button onClick={() => toggleMenu("widgets")} className="w-full mt-2">
                 {activeMenu === "widgets" ? "Hide Widgets Menu" : "Show Widgets Menu"}
@@ -953,20 +1677,46 @@ ${slotListInfo}`
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Link href={`/widgets/now-playing?user=${currentUsername}`} target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Now Playing</Button>
+                            <Link href={`/widgets/now-playing?user=${currentUsername}&source=extension`} target="_blank" rel="noopener noreferrer">
+                              <Button className="w-full">Now Playing (Extension)</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>Right click and select 'open in new tab'</p>
+                            <p>Shows game from browser extension. Right click and select 'open in new tab'</p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
                       <Button
                         onClick={() =>
                           copyToClipboard(
-                            `http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}`,
-                            "Now Playing widget link copied to clipboard",
+                            `http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=extension`,
+                            "Extension Now Playing widget link copied to clipboard",
+                          )
+                        }
+                        variant="ghost"
+                        size="icon"
+                      >
+                        <Clipboard className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Link href={`/widgets/now-playing?user=${currentUsername}&source=hunt`} target="_blank" rel="noopener noreferrer">
+                              <Button className="w-full">Now Playing (Bonus Hunt)</Button>
+                            </Link>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Shows next game from active bonus hunt. Right click and select 'open in new tab'</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <Button
+                        onClick={() =>
+                          copyToClipboard(
+                            `http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=hunt`,
+                            "Bonus Hunt Now Playing widget link copied to clipboard",
                           )
                         }
                         variant="ghost"
@@ -1007,18 +1757,6 @@ ${slotListInfo}`
               <Link href="/spider-edit">
                 <Button className="w-full">Customisable Overlay</Button>
               </Link>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link href={`/obs?size=${obsSizes.obs}`} target="_blank" rel="noopener noreferrer">
-                      <Button className="w-full">Open OBS Browser Source</Button>
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Right click and select 'open in new tab'</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               <Link href="/collect-bonuses">
                 <Button className="w-full">Collect Bonuses</Button>
               </Link>
@@ -1078,6 +1816,148 @@ ${slotListInfo}`
                 <VersionHistory />
               </div>
             </div>
+          </>
+            ) : (
+              <>
+                {/* Live Games View */}
+                <div className="flex flex-col space-y-2">
+                  <SlotNameAutocomplete
+                    value={liveGame.name}
+                    onChange={(v) => {
+                      setLiveGame({ ...liveGame, name: v })
+                      if (!v) setSelectedLiveGame(null)
+                    }}
+                    onSelect={(item) => {
+                      setLiveGame({ ...liveGame, name: item.title })
+                      setSelectedLiveGame({ title: item.title, provider: item.provider })
+                    }}
+                    placeholder="Game Name"
+                  />
+                  <div className="flex space-x-2">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="Stake"
+                      value={liveGame.bet}
+                      onChange={(e) => setLiveGame({ ...liveGame, bet: e.target.value })}
+                      className={`flex-1 ${noSpinnerClass}`}
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="Win Amount"
+                      value={liveGame.win}
+                      onChange={(e) => setLiveGame({ ...liveGame, win: e.target.value })}
+                      className={`flex-1 ${noSpinnerClass}`}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleRecordLiveWin}
+                      disabled={isRecordingWin || !liveGame.name || !liveGame.bet || !liveGame.win}
+                      className="flex-1"
+                    >
+                      {isRecordingWin ? "Recording..." : "💰 Record Win"}
+                    </Button>
+                    {selectedLiveGame && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleUpdateNowPlaying}
+                        disabled={isUpdatingGame || !selectedLiveGame}
+                        className="flex-1"
+                      >
+                        {isUpdatingGame ? "Updating..." : "Update Now Playing"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col space-y-2 mt-4">
+                  <div className="flex items-center justify-between">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Link href={`/widgets/now-playing?user=${currentUsername}&source=extension`} target="_blank" rel="noopener noreferrer">
+                            <Button className="w-full">Now Playing Widget</Button>
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Shows game from browser extension. Right click and select 'open in new tab'</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <Button
+                      onClick={() =>
+                        copyToClipboard(
+                          `http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=extension`,
+                          "Extension Now Playing widget link copied to clipboard",
+                        )
+                      }
+                      variant="ghost"
+                      size="icon"
+                    >
+                      <Clipboard className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      const session = localStorage.getItem("huntmaster_session")
+                      if (session) {
+                        copyToClipboard(session, "Session token copied to clipboard!")
+                        setIsExtensionTokenDialogOpen(true)
+                      } else {
+                        alert("No session found. Please log in first.")
+                      }
+                    }}
+                    className="w-full"
+                    variant="outline"
+                  >
+                    Copy ID for Browser Extension
+                  </Button>
+                  {isAdmin && (
+                    <Link href="/admin">
+                      <Button className="w-full">Admin Dashboard</Button>
+                    </Link>
+                  )}
+                  <div className="flex justify-between items-center gap-2 mt-2">
+                    <Button
+                      onClick={handleOpenInstructions}
+                      className="flex-1 p-2 transition-all duration-200 active:scale-90"
+                      variant="outline"
+                    >
+                      <Info className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      onClick={() => window.location.reload()}
+                      className="flex-1 p-2 transition-all duration-200 active:scale-90"
+                      variant="outline"
+                    >
+                      <RefreshCw className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        localStorage.removeItem("huntmaster_session")
+                        router.push("/")
+                      }}
+                      className="flex-1 p-2 transition-all duration-200 active:scale-90"
+                      variant="outline"
+                    >
+                      <LogOut className="w-5 h-5" />
+                    </Button>
+                  </div>
+                  {currentUsername && (
+                    <div className="mt-2 flex justify-center">
+                      <span className="text-sm text-gray-400 font-medium">
+                        Signed in as: {currentUsername}
+                      </span>
+                    </div>
+                  )}
+                  <div className="mt-2 flex justify-center">
+                    <VersionHistory />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1309,8 +2189,14 @@ ${slotListInfo}`
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
               />
               <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}`}
+                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=extension`}
                 imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+                title="Now Playing (Extension)"
+              />
+              <WidgetItem
+                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=hunt`}
+                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
+                title="Now Playing (Bonus Hunt)"
               />
             </div>
             <p className="mt-4">
@@ -1339,6 +2225,63 @@ ${slotListInfo}`
           <DialogFooter>
             <Button onClick={() => setIsClipboardDialogOpen(false)} variant="default">
               OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isExtensionTokenDialogOpen} onOpenChange={setIsExtensionTokenDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Session Token Copied! ✓</DialogTitle>
+            <DialogDescription>
+              Your session token has been copied to your clipboard. Follow these steps to configure the browser extension:
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <ol className="list-decimal list-inside space-y-3 text-sm text-gray-700 dark:text-gray-300">
+              <li>
+                <strong>Open the browser extension</strong> - Click the HuntMaster Game Detector icon in your browser toolbar
+              </li>
+              <li>
+                <strong>Scroll to "API Configuration"</strong> section at the bottom of the popup
+              </li>
+              <li>
+                <strong>Paste the token</strong> - Click in the "Session Token" field and paste (Ctrl+V / Cmd+V)
+              </li>
+              <li>
+                <strong>Set API URL</strong> - Make sure the API Base URL is set to:
+                <br />
+                <div className="mt-2 space-y-1">
+                  {typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (
+                    <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs block">
+                      http://localhost:3000
+                    </code>
+                  ) : (
+                    <>
+                      <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs block">
+                        https://huntmaster.vercel.app
+                      </code>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        (For local development, use: http://localhost:3000)
+                      </p>
+                    </>
+                  )}
+                </div>
+              </li>
+              <li>
+                <strong>Click "Save Configuration"</strong> - Your extension is now ready to use!
+              </li>
+            </ol>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm">
+              <strong className="text-blue-800 dark:text-blue-200">💡 Tip:</strong>
+              <p className="text-blue-700 dark:text-blue-300 mt-1">
+                Once configured, the extension will automatically detect games from casino sites and update your Now Playing widget.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setIsExtensionTokenDialogOpen(false)} variant="default">
+              Got it!
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,6 +3,11 @@
 import { useState, useEffect } from "react"
 import { Trophy } from "lucide-react"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { decrypt } from "@/lib/protection"
 
 interface Slot {
   id: string
@@ -19,120 +24,59 @@ export default function OBSBrowserSource2() {
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
   const username = searchParams.get("user")
-
-  const [slots, setSlots] = useState<Slot[]>([])
+  const [userId, setUserId] = useState<string | null>(null)
   const [startBalance, setStartBalance] = useState(0)
   const [endBalance, setEndBalance] = useState(0)
   const [colourTheme, setColourTheme] = useState("blue")
   const [selectedFont, setSelectedFont] = useState("Arial")
   const [fontSize, setFontSize] = useState(24)
 
+  // Use real-time subscriptions instead of polling
+  const slotsByUsername = useSupabaseSlotsByUsername(username || null)
+  const slotsByUserId = useSupabaseSlots(username ? null : userId)
+  const settingsByUsername = useSupabaseUserSettingsByUsername(username || null)
+  const settingsByUserId = useSupabaseUserSettings(username ? null : userId)
+
+  // Determine which data to use
+  const slotsData = username ? slotsByUsername : slotsByUserId
+  const settingsData = username ? settingsByUsername : settingsByUserId
+
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  }))
+
+  // Extract userId from session if no username provided
   useEffect(() => {
-    const loadSlotsFromFirestore = async () => {
-      try {
-        // If username is provided in URL, load that user's slots
-        if (username) {
-          const response = await fetch(`/api/slots/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({
-              id: slot.id,
-              name: slot.name,
-              bet: slot.bet,
-              win: slot.win,
-            })))
-          }
-        } else {
-          // Fallback to session-based loading
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/slots", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ session, action: "get" }),
-            })
-            const data = await response.json()
-            if (data.success && data.slots) {
-              setSlots(data.slots.map((slot: any) => ({
-                id: slot.id,
-                name: slot.name,
-                bet: slot.bet,
-                win: slot.win,
-              })))
-            }
-          }
+    if (!username) {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
+        } catch (error) {
+          console.error("Error parsing session:", error)
+          setUserId(null)
         }
-      } catch (error) {
-        console.error("Error loading slots:", error)
+      } else {
+        setUserId(null)
       }
     }
-
-    const loadUserSettings = async () => {
-      try {
-        if (username) {
-          // Load settings by username (for OBS browser sources)
-          const response = await fetch(`/api/user-settings/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.settings) {
-            setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
-            setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
-            if (data.settings.colourTheme) setColourTheme(data.settings.colourTheme)
-            if (data.settings.selectedFont) setSelectedFont(data.settings.selectedFont)
-            if (data.settings.fontSize) setFontSize(Number.parseInt(data.settings.fontSize))
-          }
-        } else {
-          // Fallback to session-based loading
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
-            const data = await response.json()
-            if (data.success && data.settings) {
-              setStartBalance(Number.parseFloat(data.settings.startBalance) || 0)
-              setEndBalance(Number.parseFloat(data.settings.endBalance) || 0)
-              if (data.settings.colourTheme) setColourTheme(data.settings.colourTheme)
-              if (data.settings.selectedFont) setSelectedFont(data.settings.selectedFont)
-              if (data.settings.fontSize) setFontSize(Number.parseInt(data.settings.fontSize))
-            }
-          } else {
-            // Ultimate fallback to localStorage
-            const storedStartBalance = localStorage.getItem("startBalance")
-            if (storedStartBalance) {
-              setStartBalance(Number.parseFloat(storedStartBalance))
-            }
-            const storedEndBalance = localStorage.getItem("endBalance")
-            if (storedEndBalance) {
-              setEndBalance(Number.parseFloat(storedEndBalance))
-            }
-            const storedColourTheme = localStorage.getItem("colourTheme")
-            if (storedColourTheme) {
-              setColourTheme(storedColourTheme)
-            }
-            const storedFont = localStorage.getItem("selectedFont")
-            if (storedFont) {
-              setSelectedFont(storedFont)
-            }
-            const storedFontSize = localStorage.getItem("fontSize")
-            if (storedFontSize) {
-              setFontSize(Number.parseInt(storedFontSize))
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error loading user settings:", error)
-      }
-    }
-    
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
-      await loadUserSettings()
-    }
-
-    loadData()
-    const interval = setInterval(loadData, 2000)
-    return () => clearInterval(interval)
   }, [username])
+
+  // Update state from real-time settings
+  useEffect(() => {
+    if (settingsData?.settings) {
+      const s = settingsData.settings
+      setStartBalance(Number.parseFloat(s.startBalance) || 0)
+      setEndBalance(Number.parseFloat(s.endBalance) || 0)
+      if (s.colourTheme) setColourTheme(s.colourTheme)
+      if (s.selectedFont) setSelectedFont(s.selectedFont)
+      if (s.fontSize) setFontSize(Number.parseInt(String(s.fontSize)))
+    }
+  }, [settingsData?.settings])
 
   const totalWinAmount = slots.reduce((sum, slot) => sum + (slot.win !== null ? Number(slot.win) : 0), 0)
   const totalBetAmount = slots.reduce((sum, slot) => sum + slot.bet, 0)

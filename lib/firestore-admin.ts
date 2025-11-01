@@ -11,6 +11,8 @@ export interface User {
   discordId?: string
   email?: string
   isActive?: boolean // Active status - defaults to true for admins, false for new users
+  huntmaster?: boolean // Access flag for HuntMaster application
+  huntmasterAdmin?: boolean // Admin flag for HuntMaster (separate from main app admin)
   createdAt: Date | Timestamp
 }
 
@@ -91,6 +93,24 @@ export interface UserWin {
   winAmount: number
   xWin: number
   createdAt: Date | Timestamp
+}
+
+export interface CurrentGame {
+  id: string
+  userId: string
+  gameTitle: string
+  provider?: string
+  updatedAt: Date | Timestamp
+}
+
+export interface ApiKey {
+  id: string
+  userId: string
+  keyHash: string // Hashed version of the key for verification
+  name?: string // Optional label/name for the key (e.g., "Browser Extension")
+  createdAt: Date | Timestamp
+  lastUsedAt?: Date | Timestamp
+  isActive: boolean
 }
 
 // Firestore database operations using Admin SDK
@@ -409,6 +429,125 @@ export const firestoreAdmin = {
         }
       })
       return { bestWinAmount, bestXWin, bestWinGame, bestXWinGame }
+    },
+  },
+
+  // Current Game operations
+  currentGame: {
+    async findByUserId(userId: string): Promise<CurrentGame | null> {
+      const snapshot = await adminDb.collection("currentGames")
+        .where("userId", "==", userId)
+        .limit(1)
+        .get()
+      
+      if (snapshot.empty) return null
+      
+      const doc = snapshot.docs[0]
+      return {
+        id: doc.id,
+        ...doc.data(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+      } as CurrentGame
+    },
+    async set(userId: string, gameTitle: string, provider?: string): Promise<CurrentGame> {
+      // Check if current game exists for this user
+      const existing = await this.findByUserId(userId)
+      
+      if (existing) {
+        // Update existing
+        await adminDb.collection("currentGames").doc(existing.id).update({
+          gameTitle,
+          provider: provider || null,
+          updatedAt: admin.firestore.Timestamp.now(),
+        })
+        return {
+          id: existing.id,
+          userId,
+          gameTitle,
+          provider,
+          updatedAt: new Date(),
+        }
+      } else {
+        // Create new
+        const docRef = await adminDb.collection("currentGames").add({
+          userId,
+          gameTitle,
+          provider: provider || null,
+          updatedAt: admin.firestore.Timestamp.now(),
+        })
+        return {
+          id: docRef.id,
+          userId,
+          gameTitle,
+          provider,
+          updatedAt: new Date(),
+        }
+      }
+    },
+    async clear(userId: string): Promise<void> {
+      const existing = await this.findByUserId(userId)
+      if (existing) {
+        await adminDb.collection("currentGames").doc(existing.id).delete()
+      }
+    },
+  },
+
+  // API Key operations
+  apiKeys: {
+    async findByUserId(userId: string): Promise<ApiKey[]> {
+      const snapshot = await adminDb.collection("apiKeys")
+        .where("userId", "==", userId)
+        .where("isActive", "==", true)
+        .orderBy("createdAt", "desc")
+        .get()
+      return snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        lastUsedAt: doc.data().lastUsedAt?.toDate() || undefined,
+      })) as ApiKey[]
+    },
+    async findByKeyHash(keyHash: string): Promise<ApiKey | null> {
+      const snapshot = await adminDb.collection("apiKeys")
+        .where("keyHash", "==", keyHash)
+        .where("isActive", "==", true)
+        .limit(1)
+        .get()
+      if (snapshot.empty) return null
+      const doc = snapshot.docs[0]
+      return {
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        lastUsedAt: doc.data().lastUsedAt?.toDate() || undefined,
+      } as ApiKey
+    },
+    async create(keyData: Omit<ApiKey, "id" | "createdAt">): Promise<ApiKey> {
+      const docRef = await adminDb.collection("apiKeys").add({
+        ...keyData,
+        createdAt: admin.firestore.Timestamp.now(),
+      })
+      return {
+        id: docRef.id,
+        ...keyData,
+        createdAt: new Date(),
+      }
+    },
+    async update(id: string, data: Partial<Omit<ApiKey, "id">>): Promise<void> {
+      const docRef = adminDb.collection("apiKeys").doc(id)
+      const updateData: any = { ...data }
+      if (data.lastUsedAt) {
+        updateData.lastUsedAt = admin.firestore.Timestamp.now()
+      }
+      await docRef.update(updateData)
+    },
+    async revoke(id: string): Promise<void> {
+      const docRef = adminDb.collection("apiKeys").doc(id)
+      await docRef.update({ isActive: false })
+    },
+    async delete(id: string): Promise<void> {
+      const docRef = adminDb.collection("apiKeys").doc(id)
+      await docRef.delete()
     },
   },
 }

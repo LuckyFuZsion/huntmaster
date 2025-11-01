@@ -1,40 +1,58 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { decrypt } from "@/lib/protection"
 
 // Exchange rate: 1 USD = 0.00094 ARS
 const EXCHANGE_RATE = 0.00094
 
 export default function ARSWidget() {
+  const searchParams = useSearchParams()
+  const username = searchParams.get("user")
+  const [userId, setUserId] = useState<string | null>(null)
   const [startBalance, setStartBalance] = useState<string>("0")
   const [convertedAmount, setConvertedAmount] = useState<string>("0")
   const [isLoaded, setIsLoaded] = useState(false)
 
+  // Use real-time subscriptions
+  const settingsByUsername = useSupabaseUserSettingsByUsername(username || null)
+  const settingsByUserId = useSupabaseUserSettings(username ? null : userId)
+
+  const settingsData = username ? settingsByUsername : settingsByUserId
+
   useEffect(() => {
-    const loadData = () => {
-      const storedStartBalance = localStorage.getItem("startBalance")
-
-      if (storedStartBalance) {
-        setStartBalance(storedStartBalance)
-
-        // Convert the balance to ARS
-        const balanceInUSD = Number.parseFloat(storedStartBalance)
-        const balanceInARS = balanceInUSD * EXCHANGE_RATE
-
-        // Format to 2 decimal places
-        setConvertedAmount(balanceInARS.toFixed(2))
+    if (!username) {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
+        } catch (error) {
+          setUserId(null)
+        }
       }
+    }
+  }, [username])
 
+  useEffect(() => {
+    if (settingsData?.settings?.startBalance) {
+      const balance = settingsData.settings.startBalance
+      setStartBalance(balance)
+      
+      // Convert the balance to ARS
+      const balanceInUSD = Number.parseFloat(balance)
+      const balanceInARS = balanceInUSD * EXCHANGE_RATE
+      
+      // Format to 2 decimal places
+      setConvertedAmount(balanceInARS.toFixed(2))
       if (!isLoaded) setIsLoaded(true)
+    } else if (!settingsData?.loading && !isLoaded) {
+      setIsLoaded(true)
     }
-
-    loadData()
-    const dataInterval = setInterval(loadData, 2000)
-
-    return () => {
-      clearInterval(dataInterval)
-    }
-  }, [isLoaded])
+  }, [settingsData?.settings, settingsData?.loading, isLoaded])
 
   return (
     <div className="relative w-[200px] h-[80px] flex items-center justify-center">

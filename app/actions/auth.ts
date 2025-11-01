@@ -25,11 +25,19 @@ export async function login(formData: FormData) {
   })
 
   try {
-    // Try to find user in Firestore
-    const user = await firestoreAdmin.users.findByUsername(trimmedUsername)
+    // Try to find user in Supabase first, then Firestore as fallback
+    let user = null
+    try {
+      const { supabaseAdmin } = await import("@/lib/supabase-admin")
+      user = await supabaseAdmin.users.findByUsername(trimmedUsername)
+    } catch (supabaseError) {
+      console.log("Supabase not available, trying Firestore:", supabaseError)
+      // Fallback to Firestore
+      user = await firestoreAdmin.users.findByUsername(trimmedUsername)
+    }
 
     if (!user) {
-      console.log("No user found in Firestore, checking environment variables")
+      console.log("No user found in database, checking environment variables")
       // Fallback to environment variables for backwards compatibility
       return await legacyLogin(trimmedUsername, trimmedPassword)
     }
@@ -43,6 +51,19 @@ export async function login(formData: FormData) {
 
     if (!isValidPassword) {
       return { error: "Invalid credentials" }
+    }
+
+    // Check if user has HuntMaster access
+    // Only users with huntmaster flag set to true can access the application
+    // (existing Firebase users should have this set to true when migrated)
+    const hasHuntmasterAccess = user.huntmaster === true
+
+    if (!hasHuntmasterAccess) {
+      return {
+        success: false,
+        error: "HuntMaster access required. Please contact an administrator.",
+        huntmasterAccess: false,
+      }
     }
 
     // Check if user is active - admins are always considered active
@@ -62,10 +83,11 @@ export async function login(formData: FormData) {
     console.log("Login successful for:", user.username)
 
     // Create session
+    // Use huntmasterAdmin for HuntMaster admin access (separate from main app admin)
     const session = {
       username: user.username,
       userId: user.id,
-      isAdmin: user.isAdmin,
+      isAdmin: user.huntmasterAdmin ?? false, // HuntMaster admin flag
       isActive: true,
       timestamp: Date.now(),
     }
@@ -83,15 +105,24 @@ export async function login(formData: FormData) {
 
 // Legacy login function using environment variables
 async function legacyLogin(username: string, password: string) {
-  // First, try to find the user in Firestore
+  // First, try to find the user in Supabase or Firestore
   try {
-    const firestoreUser = await firestoreAdmin.users.findByUsername(username)
-    if (firestoreUser) {
-      // User exists in Firestore, use their Firestore ID
+    let dbUser = null
+    try {
+      // Try Supabase first
+      const { supabaseAdmin } = await import("@/lib/supabase-admin")
+      dbUser = await supabaseAdmin.users.findByUsername(username)
+    } catch (supabaseError) {
+      // Fallback to Firestore
+      dbUser = await firestoreAdmin.users.findByUsername(username)
+    }
+    
+    if (dbUser) {
+      // User exists in database, use their database ID
       const session = {
-        username: firestoreUser.username,
-        userId: firestoreUser.id, // Use Firestore document ID
-        isAdmin: firestoreUser.isAdmin,
+        username: dbUser.username,
+        userId: dbUser.id,
+        isAdmin: dbUser.huntmasterAdmin ?? dbUser.isAdmin ?? false, // Use HuntMaster admin flag
         timestamp: Date.now(),
       }
       return {
@@ -100,7 +131,7 @@ async function legacyLogin(username: string, password: string) {
       }
     }
   } catch (error) {
-    console.error("Error finding user in Firestore:", error)
+    console.error("Error finding user in database:", error)
   }
 
   // If not found in Firestore, use legacy environment variables with a temporary ID
@@ -137,7 +168,9 @@ async function legacyLogin(username: string, password: string) {
   const session = {
     username: user.username,
     userId: user.userId,
-    isAdmin: user.isAdmin,
+    // For legacy env login, ADMIN_USERNAME is always admin
+    // Regular users from env are not admin
+    isAdmin: user.isAdmin, // This will be true for ADMIN_USERNAME, false for others
     timestamp: Date.now(),
   }
 

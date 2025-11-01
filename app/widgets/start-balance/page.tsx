@@ -3,6 +3,11 @@
 import { useState, useEffect, Suspense } from "react"
 import Image from "next/image"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { decrypt } from "@/lib/protection"
 
 interface Slot {
   id: string
@@ -14,68 +19,65 @@ interface Slot {
 function StartBalanceWidgetContent() {
   const [startBalance, setStartBalance] = useState("0")
   const [endBalance, setEndBalance] = useState("0")
-  const [slots, setSlots] = useState<Slot[]>([])
   const [currentStatIndex, setCurrentStatIndex] = useState(0)
   const [isLoaded, setIsLoaded] = useState(false)
   const searchParams = useSearchParams()
   const username = searchParams.get("user")
+  const [userId, setUserId] = useState<string | null>(null)
+
+  // Use real-time subscriptions
+  const slotsByUsername = useSupabaseSlotsByUsername(username || null)
+  const slotsByUserId = useSupabaseSlots(username ? null : userId)
+  const settingsByUsername = useSupabaseUserSettingsByUsername(username || null)
+  const settingsByUserId = useSupabaseUserSettings(username ? null : userId)
+
+  const slotsData = username ? slotsByUsername : slotsByUserId
+  const settingsData = username ? settingsByUsername : settingsByUserId
+
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  }))
 
   useEffect(() => {
-    const loadSlotsFromFirestore = async () => {
-      try {
-        if (username) {
-          const response = await fetch(`/api/slots/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-          }
-        } else {
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/slots", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
-            const data = await response.json()
-            if (data.success && data.slots) {
-              setSlots(data.slots.map((slot: any) => ({ id: slot.id, name: slot.name, bet: slot.bet, win: slot.win })))
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error loading slots:", error)
-      }
-    }
-    
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
+    if (!username) {
       const session = localStorage.getItem("huntmaster_session")
       if (session) {
         try {
-          const response = await fetch("/api/user-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, action: "get" }) })
-          const data = await response.json()
-          if (data.success && data.settings) {
-            setStartBalance(data.settings.startBalance || "0")
-            setEndBalance(data.settings.endBalance || "0")
-          }
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
         } catch (error) {
-          console.error("Error loading user settings:", error)
+          setUserId(null)
         }
       }
+    }
+  }, [username])
 
+  useEffect(() => {
+    if (settingsData?.settings) {
+      const s = settingsData.settings
+      // Only update if value exists (not null/undefined/empty)
+      if (s.startBalance != null && s.startBalance !== "") {
+        setStartBalance(s.startBalance)
+      }
+      if (s.endBalance != null && s.endBalance !== "") {
+        setEndBalance(s.endBalance)
+      }
       if (!isLoaded) setIsLoaded(true)
+    } else if (!settingsData?.loading && !isLoaded) {
+      setIsLoaded(true)
     }
+  }, [settingsData?.settings, settingsData?.loading, isLoaded])
 
-    loadData()
-    const dataInterval = setInterval(loadData, 2000)
-
-    // Rotate stats every 4 seconds
+  // Rotate stats every 4 seconds
+  useEffect(() => {
     const rotationInterval = setInterval(() => {
-      setCurrentStatIndex((prev) => (prev + 1) % 6) // Updated to include logo
+      setCurrentStatIndex((prev) => (prev + 1) % 6)
     }, 4000)
-
-    return () => {
-      clearInterval(dataInterval)
-      clearInterval(rotationInterval)
-    }
-  }, [username, isLoaded])
+    return () => clearInterval(rotationInterval)
+  }, [])
 
   const calculateStats = () => {
     const usedBalance = Number(startBalance) - Number(endBalance)

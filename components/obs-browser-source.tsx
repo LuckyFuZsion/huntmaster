@@ -3,6 +3,11 @@
 import { useState, useEffect } from "react"
 import React from "react"
 import { useSearchParams } from "next/navigation"
+import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
+import { useSupabaseUserSettingsByUsername } from "@/lib/hooks/useSupabaseUserSettingsByUsername"
+import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
+import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { decrypt } from "@/lib/protection"
 
 interface Slot {
   id: string
@@ -12,96 +17,76 @@ interface Slot {
 }
 
 export default function OBSBrowserSource() {
-  const [slots, setSlots] = useState<Slot[]>([])
   const [startBalance, setStartBalance] = useState(0)
   const [endBalance, setEndBalance] = useState(0)
   const [colourTheme, setColourTheme] = useState("blue")
   const [selectedFont, setSelectedFont] = useState("Arial")
   const [fontSize, setFontSize] = useState(24)
   const [mounted, setMounted] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
 
   const searchParams = useSearchParams()
   const size = searchParams.get("size") || "600px"
   const username = searchParams.get("user") // Get username from URL parameter
 
+  // Use real-time subscriptions instead of polling
+  // Only subscribe to one source at a time based on whether username is provided
+  const slotsByUsername = useSupabaseSlotsByUsername(username || null)
+  const slotsByUserId = useSupabaseSlots(username ? null : userId)
+  const settingsByUsername = useSupabaseUserSettingsByUsername(username || null)
+  const settingsByUserId = useSupabaseUserSettings(username ? null : userId)
+
+  // Determine which data to use
+  const slotsData = username ? slotsByUsername : slotsByUserId
+  const settingsData = username ? settingsByUsername : settingsByUserId
+  const slots: Slot[] = (slotsData?.slots || []).map((slot: any) => ({
+    id: slot.id,
+    name: slot.name,
+    bet: slot.bet,
+    win: slot.win,
+  })).filter((slot, index, self) => 
+    // Additional deduplication safeguard: keep only first occurrence of each ID or name
+    index === self.findIndex((s) => s.id === slot.id || s.name.toLowerCase().trim() === slot.name.toLowerCase().trim())
+  )
+
   useEffect(() => {
     setMounted(true)
-    
-    const loadSlotsFromFirestore = async () => {
-      try {
-        // If username is provided in URL, load that user's slots
-        if (username) {
-          const response = await fetch(`/api/slots/by-username?username=${username}`)
-          const data = await response.json()
-          if (data.success && data.slots) {
-            setSlots(data.slots.map((slot: any) => ({
-              id: slot.id,
-              name: slot.name,
-              bet: slot.bet,
-              win: slot.win,
-            })))
-          }
-        } else {
-          // Fallback to session-based loading
-          const session = localStorage.getItem("huntmaster_session")
-          if (session) {
-            const response = await fetch("/api/slots", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ session, action: "get" }),
-            })
-            const data = await response.json()
-            if (data.success && data.slots) {
-              setSlots(data.slots.map((slot: any) => ({
-                id: slot.id,
-                name: slot.name,
-                bet: slot.bet,
-                win: slot.win,
-              })))
-            }
-          }
+  }, [])
+
+  // Extract userId from session if no username provided
+  useEffect(() => {
+    if (!username) {
+      const session = localStorage.getItem("huntmaster_session")
+      if (session) {
+        try {
+          const sessionData = JSON.parse(decrypt(session))
+          setUserId(sessionData.userId || null)
+        } catch (error) {
+          console.error("Error parsing session:", error)
+          setUserId(null)
         }
-      } catch (error) {
-        console.error("Error loading slots:", error)
+      } else {
+        setUserId(null)
       }
     }
-    
-    // Load data from Firestore
-    const loadData = async () => {
-      await loadSlotsFromFirestore()
-      
-      // Load other settings from localStorage
-      const storedStartBalance = localStorage.getItem("startBalance")
-      if (storedStartBalance) {
-        setStartBalance(Number.parseFloat(storedStartBalance))
-      }
-      const storedEndBalance = localStorage.getItem("endBalance")
-      if (storedEndBalance) {
-        setEndBalance(Number.parseFloat(storedEndBalance))
-      }
-      const storedColourTheme = localStorage.getItem("colourTheme")
-      if (storedColourTheme) {
-        setColourTheme(storedColourTheme)
-      }
-      const storedFont = localStorage.getItem("selectedFont")
-      if (storedFont) {
-        setSelectedFont(storedFont)
-      }
-      const storedFontSize = localStorage.getItem("fontSize")
-      if (storedFontSize) {
-        setFontSize(Number.parseInt(storedFontSize))
-      }
-    }
-
-    loadData()
-
-    // Set up an interval to check for updates
-    const interval = setInterval(loadData, 2000) // Check every 2 seconds
-
-    return () => clearInterval(interval)
   }, [username])
+
+  // Update state from real-time settings
+  useEffect(() => {
+    if (settingsData?.settings) {
+      const s = settingsData.settings
+      // Only update if value exists (not null/undefined/empty)
+      if (s.startBalance != null && s.startBalance !== "") {
+        setStartBalance(Number.parseFloat(s.startBalance) || 0)
+      }
+      if (s.endBalance != null && s.endBalance !== "") {
+        setEndBalance(Number.parseFloat(s.endBalance) || 0)
+      }
+      if (s.colourTheme) setColourTheme(s.colourTheme)
+      if (s.selectedFont) setSelectedFont(s.selectedFont)
+      if (s.fontSize) setFontSize(Number.parseInt(String(s.fontSize)))
+    }
+  }, [settingsData?.settings])
 
   const totalBet = slots.reduce((sum, slot) => sum + Number.parseFloat(slot.bet.toString()), 0)
   const totalWinAmount = slots.reduce((sum, slot) => sum + (slot.win !== null ? Number(slot.win) : 0), 0)
