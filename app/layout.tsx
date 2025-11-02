@@ -8,7 +8,12 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata = {
   title: "Bonus Hunt Tracker",
   description: "Track your slot game bonuses and winnings",
-    generator: 'v0.app'
+  generator: 'v0.app',
+  icons: {
+    icon: '/HM.png',
+    shortcut: '/HM.png',
+    apple: '/HM.png',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

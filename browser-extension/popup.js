@@ -4,6 +4,10 @@ const API_BASE_URL_KEY = 'huntmaster_api_base_url';
 const SESSION_TOKEN_KEY = 'huntmaster_session_token';
 
 let currentGameInfo = null;
+let userEditedWinAmount = false; // Track if user manually edited win amount
+let userEditedStakeAmount = false; // Track if user manually edited stake amount
+let userEditedGameTitle = false; // Track if user manually edited game title
+let userEditedGameProvider = false; // Track if user manually edited game provider
 
 // Decrypt session token to extract username
 function decryptSession(sessionToken) {
@@ -127,7 +131,11 @@ async function detectGame() {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'HUNTMASTER_GAME_DETECTED') {
       displayGameInfo(message.data);
+      sendResponse({ success: true });
+      return true; // Indicate we'll send async response
     }
+    // Return false if we don't handle the message to avoid async response warning
+    return false;
   });
 }
 
@@ -140,14 +148,22 @@ function displayGameInfo(gameInfo) {
     gameInfo.source || '-'
   );
   
-  // Auto-fill stake and win amounts if detected
-  if (gameInfo.stake !== null && gameInfo.stake !== undefined) {
-    document.getElementById('stake-amount').value = gameInfo.stake;
-    updateXWin();
+  // Auto-fill stake and win amounts if detected, but only if user hasn't manually edited them
+  if (gameInfo.stake !== null && gameInfo.stake !== undefined && !userEditedStakeAmount) {
+    const stakeInput = document.getElementById('stake-amount');
+    // Only auto-fill if field is empty or matches the previous detected value
+    if (!stakeInput.value || stakeInput.value === '') {
+      stakeInput.value = gameInfo.stake;
+      updateXWin();
+    }
   }
-  if (gameInfo.winAmount !== null && gameInfo.winAmount !== undefined) {
-    document.getElementById('win-amount').value = gameInfo.winAmount;
-    updateXWin();
+  if (gameInfo.winAmount !== null && gameInfo.winAmount !== undefined && !userEditedWinAmount) {
+    const winInput = document.getElementById('win-amount');
+    // Only auto-fill if field is empty or matches the previous detected value
+    if (!winInput.value || winInput.value === '') {
+      winInput.value = gameInfo.winAmount;
+      updateXWin();
+    }
   }
 }
 
@@ -165,11 +181,19 @@ function updateDetectedGame(title, provider, source) {
   sourceEl.textContent = source;
   sourceEl.className = source === '-' ? 'game-info-value empty' : 'game-info-value';
 
-  // Auto-fill manual entry if detected
-  if (title && title !== 'Not detected' && title !== 'Detecting...') {
-    document.getElementById('game-title').value = title;
-    if (provider && provider !== '-') {
-      document.getElementById('game-provider').value = provider;
+  // Auto-fill manual entry if detected, but only if user hasn't manually edited these fields
+  if (title && title !== 'Not detected' && title !== 'Detecting...' && !userEditedGameTitle) {
+    const gameTitleInput = document.getElementById('game-title');
+    // Only auto-fill if field is empty
+    if (!gameTitleInput.value || gameTitleInput.value.trim() === '') {
+      gameTitleInput.value = title;
+    }
+  }
+  if (provider && provider !== '-' && !userEditedGameProvider) {
+    const gameProviderInput = document.getElementById('game-provider');
+    // Only auto-fill if field is empty
+    if (!gameProviderInput.value || gameProviderInput.value.trim() === '') {
+      gameProviderInput.value = provider;
     }
   }
 }
@@ -239,19 +263,44 @@ async function recordWin() {
       }),
     });
 
-    const data = await response.json();
+    // Check if response is ok before parsing JSON
+    let data;
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      console.error('Failed to parse response JSON:', jsonError);
+      showStatus(`Error: Server returned invalid response (${response.status})`, 'error');
+      return;
+    }
+
+    // If response is not ok, show error even if data.success might be false
+    if (!response.ok) {
+      const errorMsg = data?.error || `HTTP ${response.status}: ${response.statusText}`;
+      console.error('API returned error status:', response.status, data);
+      showStatus(`Error: ${errorMsg}`, 'error');
+      return;
+    }
 
     if (data.success) {
       const xWin = stake > 0 ? (winAmount / stake).toFixed(2) : '0.00';
       showStatus(`✓ Win recorded! ${winAmount} (${xWin}x)`, 'success');
       // Clear win amount (keep stake for next round)
       document.getElementById('win-amount').value = '';
+      userEditedWinAmount = false; // Reset edit flag after successful save
+      // Note: We don't reset game title/provider flags - user's manual entries should persist
       updateXWin();
     } else {
-      showStatus(`Error: ${data.error || 'Failed to record win'}`, 'error');
+      // Show detailed error message
+      let errorMsg = data.error || 'Failed to record win';
+      if (data.details) {
+        errorMsg += ` (${JSON.stringify(data.details)})`;
+      }
+      console.error('Win recording failed:', data);
+      showStatus(`Error: ${errorMsg}`, 'error');
     }
   } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error');
+    console.error('Win recording exception:', error);
+    showStatus(`Error: ${error.message || 'Network error or server unavailable'}`, 'error');
   } finally {
     recordBtn.disabled = false;
     recordBtn.textContent = '💰 Record Win';
@@ -335,6 +384,9 @@ async function clearCurrentGame() {
       showStatus('✓ Current game cleared', 'success');
       document.getElementById('game-title').value = '';
       document.getElementById('game-provider').value = '';
+      // Reset edit flags so auto-fill can work again
+      userEditedGameTitle = false;
+      userEditedGameProvider = false;
     } else {
       showStatus(`Error: ${data.error || 'Failed to clear game'}`, 'error');
     }
@@ -401,8 +453,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   }, 2000);
 
   // Update X win calculation when stake or win amount changes
-  document.getElementById('stake-amount').addEventListener('input', updateXWin);
-  document.getElementById('win-amount').addEventListener('input', updateXWin);
+  // Also track manual edits to prevent auto-fill from overwriting user input
+  document.getElementById('stake-amount').addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      // User manually cleared the field - allow auto-fill again
+      userEditedStakeAmount = false;
+    } else {
+      // User entered a value - don't auto-fill anymore
+      userEditedStakeAmount = true;
+    }
+    updateXWin();
+  });
+  document.getElementById('win-amount').addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      // User manually cleared the field - allow auto-fill again
+      userEditedWinAmount = false;
+    } else {
+      // User entered a value - don't auto-fill anymore
+      userEditedWinAmount = true;
+    }
+    updateXWin();
+  });
+
+  // Track manual edits for game title and provider
+  document.getElementById('game-title').addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      // User manually cleared the field - allow auto-fill again
+      userEditedGameTitle = false;
+    } else {
+      // User entered a value - don't auto-fill anymore
+      userEditedGameTitle = true;
+    }
+  });
+  document.getElementById('game-provider').addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    if (value === '') {
+      // User manually cleared the field - allow auto-fill again
+      userEditedGameProvider = false;
+    } else {
+      // User entered a value - don't auto-fill anymore
+      userEditedGameProvider = true;
+    }
+  });
 
   // Record win button
   document.getElementById('record-win-btn').addEventListener('click', recordWin);

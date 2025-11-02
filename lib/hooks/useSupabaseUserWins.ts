@@ -116,6 +116,7 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
     }
 
     let channel: any = null
+    const isCleaningUpRef = { current: false } // Track if we're cleaning up
     const cacheKey = `${username}:${gameTitle}`
 
     // Load initial data only if username/gameTitle changed
@@ -237,15 +238,21 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
         console.log('User wins subscription status:', status, 'for', username, gameTitle)
         if (status === 'SUBSCRIBED') {
           console.log('Successfully subscribed to user wins updates for', username, gameTitle)
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        } else if (status === 'CLOSED') {
+          // CLOSED is expected during cleanup - don't log as warning unless unexpected
+          if (!isCleaningUpRef.current) {
+            console.warn('User wins subscription closed unexpectedly. Will retry on next effect run')
+          } else {
+            console.log('User wins subscription closed during cleanup (expected)')
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.warn('User wins subscription error:', status, 'Will retry on next effect run')
-          // The subscription will be cleaned up and recreated on the next effect run
-          // We could also manually trigger a reload here as a fallback
-          if (!loadingRef.current) {
+          // Only retry if we're not cleaning up
+          if (!isCleaningUpRef.current && !loadingRef.current) {
             // If we're not loading, try reloading anyway as a fallback
             console.log('Reloading best wins due to subscription error')
             setTimeout(() => {
-              if (!loadingRef.current) {
+              if (!loadingRef.current && !isCleaningUpRef.current) {
                 loadBestWinsRef.current()
               }
             }, 2000) // Wait 2 seconds before retry
@@ -254,11 +261,19 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
       })
 
     return () => {
+      // Mark as cleaning up to prevent logging CLOSED as an error
+      isCleaningUpRef.current = true
+      
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
       }
       if (channel) {
-        supabase.removeChannel(channel)
+        try {
+          supabase.removeChannel(channel)
+        } catch (error) {
+          // Channel might already be closed - this is fine
+          console.log('Channel already closed during cleanup (expected)')
+        }
       }
     }
   }, [username, gameTitle]) // Only depend on username/gameTitle, not loadBestWins

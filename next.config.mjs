@@ -11,6 +11,14 @@ const nextConfig = {
     domains: ['luckyfuzsion.com', 'gxciioabwrkahdfe.public.blob.vercel-storage.com'],
     unoptimized: true,
   },
+  async rewrites() {
+    return [
+      {
+        source: '/favicon.ico',
+        destination: '/HM.png',
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Exclude Node.js built-in modules from client-side bundles

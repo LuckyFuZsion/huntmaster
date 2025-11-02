@@ -10,10 +10,16 @@
     
     // Common provider name patterns that need special handling
     const specialCases = {
-      'nolimit': 'NoLimit',
-      'pragmatic': 'Pragmatic',
+      'nlc': 'NoLimit City', // NLC is abbreviation for NoLimit City
+      'nolimit': 'NoLimit City', // Full name variant
+      'nolimit city': 'NoLimit City',
+      'pragmatic play': 'Pragmatic Play', // Full name
+      'pragmatic-play': 'Pragmatic Play', // URL format
+      'pragmatic': 'Pragmatic Play', // Short name maps to full name
       'playngo': 'Play\'n GO',
+      'play\'n go': 'Play\'n GO',
       'netent': 'NetEnt',
+      'net entertainment': 'NetEnt',
       'microgaming': 'Microgaming',
       'evolution': 'Evolution',
       'red tiger': 'Red Tiger',
@@ -23,13 +29,22 @@
       'relax gaming': 'Relax Gaming',
     };
     
-    let formatted = provider.toLowerCase();
+    let formatted = provider.toLowerCase().trim();
+    
+    // Check for exact matches first (handles "NLC", "nlc", etc.)
+    if (specialCases[formatted]) {
+      return specialCases[formatted];
+    }
     
     // Check for special cases (partial matches)
-    for (const [key, value] of Object.entries(specialCases)) {
+    // Sort by key length (longest first) to match "nolimit city" before "nolimit"
+    const sortedCases = Object.entries(specialCases).sort((a, b) => b[0].length - a[0].length);
+    for (const [key, value] of sortedCases) {
       if (formatted.includes(key)) {
-        // Replace the matching part
+        // Replace the matching part with the formatted value
         formatted = formatted.replace(key, value);
+        // Return early with the formatted value
+        return value;
       }
     }
     
@@ -53,10 +68,10 @@
     if (hostname.includes('gamba') || url.includes('gamba')) {
       return 'gamba';
     }
+    if (hostname.includes('cryptocasino') || url.includes('cryptocasino')) {
+      return 'cryptocasino';
+    }
     // Add more casinos here as needed
-    // if (hostname.includes('casino2') || url.includes('casino2')) {
-    //   return 'casino2';
-    // }
     
     return 'generic';
   }
@@ -91,6 +106,73 @@
         provider = formatProviderName(provider);
         
         return { title: gameTitle, provider: provider };
+      }
+    }
+    
+    if (casino === 'cryptocasino') {
+      // CryptoCasino URL format: /casino/pragmatic-play/big-bass-halloween-2/demo
+      // Extract provider from URL path (second segment after /casino/)
+      const urlPath = window.location.pathname.toLowerCase();
+      const urlMatch = urlPath.match(/\/casino\/([^\/]+)\//);
+      let providerFromUrl = null;
+      if (urlMatch && urlMatch[1]) {
+        // Convert "pragmatic-play" to "Pragmatic Play"
+        providerFromUrl = urlMatch[1]
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        providerFromUrl = formatProviderName(providerFromUrl);
+      }
+      
+      // First, handle titles with "by | CryptoCasino.com" suffix - remove it
+      // Pattern: "Game Name by | CryptoCasino.com" or "Game Name - Provider by | CryptoCasino.com"
+      // Handles variations with different spacing: "by |", "by|", "by|", etc.
+      const cryptocasinoSuffixPattern = /^(.+?)\s+by\s*\|\s*CryptoCasino(?:\.com)?.*$/i;
+      const cryptocasinoSuffixMatch = title.match(cryptocasinoSuffixPattern);
+      if (cryptocasinoSuffixMatch) {
+        let cleanedTitle = cryptocasinoSuffixMatch[1].trim();
+        // Check if there's a provider separator (dash) in the cleaned title
+        const providerSepPattern = /^(.+?)\s*-\s*(.+)$/;
+        const providerSepMatch = cleanedTitle.match(providerSepPattern);
+        if (providerSepMatch) {
+          // Title has provider separated by dash (e.g., "Game Name - Pragmatic Play by | CryptoCasino.com")
+          const gameTitle = providerSepMatch[1].trim();
+          let provider = providerSepMatch[2].trim();
+          provider = formatProviderName(provider);
+          return { title: gameTitle, provider: provider };
+        } else {
+          // No provider in title (e.g., "Sweet Bonanza by | CryptoCasino.com")
+          // Use provider from URL if available (extracted from /casino/pragmatic-play/...)
+          return { title: cleanedTitle, provider: providerFromUrl };
+        }
+      }
+      
+      // CryptoCasino format: "Play Game Name" or "Play Game Name for free." or "Play Game Name - Provider for free."
+      // Handle titles starting with "Play" - remove the "Play" prefix
+      if (title.match(/^Play\s+/i)) {
+        // Pattern with provider: "Play Game Name - Provider" or "Play Game Name - Provider for free"
+        const withProviderPattern = /^Play\s+(.+?)\s*-\s*(.+?)(?:\s+for\s+free.*?|$)/i;
+        const withProviderMatch = title.match(withProviderPattern);
+        if (withProviderMatch) {
+          const gameTitle = withProviderMatch[1].trim();
+          let provider = withProviderMatch[2].trim();
+          // Remove "for free" or any trailing text
+          provider = provider.replace(/\s+for\s+free.*$/i, '').trim();
+          provider = formatProviderName(provider);
+          
+          return { title: gameTitle, provider: provider };
+        }
+        
+        // Pattern without provider: "Play Game Name" or "Play Game Name for free."
+        const withoutProviderPattern = /^Play\s+(.+?)(?:\s+for\s+free.*?|$)/i;
+        const withoutProviderMatch = title.match(withoutProviderPattern);
+        if (withoutProviderMatch) {
+          const gameTitle = withoutProviderMatch[1].trim();
+          // Remove trailing period and "for free"
+          const cleanedTitle = gameTitle.replace(/\.$/, '').replace(/\s+for\s+free$/i, '').trim();
+          // Use provider from URL if available
+          return { title: cleanedTitle, provider: providerFromUrl };
+        }
       }
     }
     
@@ -210,8 +292,12 @@
         try {
           const element = document.querySelector(selector);
           if (element) {
-            const text = element.textContent?.trim() || element.getAttribute('data-game-name') || element.getAttribute('data-game-title');
+            let text = element.textContent?.trim() || element.getAttribute('data-game-name') || element.getAttribute('data-game-title');
             if (text && text.length < 100) {
+              // For CryptoCasino, remove "Play" prefix if present
+              if (casino === 'cryptocasino' && text.match(/^Play\s+/i)) {
+                text = text.replace(/^Play\s+/i, '').trim();
+              }
               gameInfo.title = text;
               gameInfo.source = 'dom-selector';
               break;
@@ -229,8 +315,12 @@
         try {
           const element = document.querySelector(selector);
           if (element) {
-            const content = element.getAttribute('content') || element.getAttribute('value');
+            let content = element.getAttribute('content') || element.getAttribute('value');
             if (content && content.length < 100) {
+              // For CryptoCasino, remove "Play" prefix if present
+              if (casino === 'cryptocasino' && content.match(/^Play\s+/i)) {
+                content = content.replace(/^Play\s+/i, '').trim();
+              }
               gameInfo.title = content;
               gameInfo.source = 'meta-tag';
               break;
@@ -244,31 +334,120 @@
 
     // Try to find provider in page if not found
     if (gameInfo.title && !gameInfo.provider) {
-      const providerSelectors = [
-        '[data-provider]',
-        '[data-game-provider]',
-        '.provider',
-        '.game-provider',
-        '[class*="provider"]',
-        'meta[name="game-provider"]',
-        'meta[name="provider"]',
-      ];
+      // Casino-specific provider detection
+      if (casino === 'cryptocasino') {
+        // First try to extract from URL path
+        const urlPath = window.location.pathname.toLowerCase();
+        const urlMatch = urlPath.match(/\/casino\/([^\/]+)\//);
+        if (urlMatch && urlMatch[1]) {
+          // Convert "pragmatic-play" to "Pragmatic Play"
+          const providerFromUrl = urlMatch[1]
+            .split('-')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+          gameInfo.provider = formatProviderName(providerFromUrl);
+        }
+        
+        // If still no provider, try DOM selectors
+        if (!gameInfo.provider) {
+          // CryptoCasino-specific selectors (add more as needed based on actual page structure)
+          const cryptocasinoSelectors = [
+            '[data-provider]',
+            '[data-game-provider]',
+            '.provider',
+            '.game-provider',
+            '.slot-provider',
+            '[class*="provider"]',
+            '[class*="Provider"]',
+            '[id*="provider"]',
+            '[id*="Provider"]',
+            'meta[name="game-provider"]',
+            'meta[name="provider"]',
+            'meta[property="og:game:provider"]',
+            // Look for text patterns like "Provider: Pragmatic Play" or "by Pragmatic Play"
+            '[class*="info"]',
+            '[class*="details"]',
+            '[class*="meta"]',
+          ];
 
-      for (const selector of providerSelectors) {
-        try {
-          const element = document.querySelector(selector);
-          if (element) {
-            const provider = element.textContent?.trim() || 
-                           element.getAttribute('data-provider') || 
-                           element.getAttribute('data-game-provider') ||
-                           element.getAttribute('content');
-            if (provider && provider.length < 50) {
-              gameInfo.provider = provider;
-              break;
+          for (const selector of cryptocasinoSelectors) {
+            try {
+              const elements = document.querySelectorAll(selector);
+              for (const element of elements) {
+                const text = element.textContent?.trim() || 
+                             element.getAttribute('data-provider') || 
+                             element.getAttribute('data-game-provider') ||
+                             element.getAttribute('content');
+                if (text && text.length < 50 && text.length > 2) {
+                  // Try to extract provider from text patterns like "Provider: Pragmatic Play"
+                  const providerMatch = text.match(/(?:provider|by)[:\s]+(.+)/i);
+                  if (providerMatch && providerMatch[1]) {
+                    const extracted = providerMatch[1].trim().split(/[\n\r,]/)[0].trim();
+                    if (extracted && extracted.length < 50) {
+                      gameInfo.provider = formatProviderName(extracted);
+                      break;
+                    }
+                  }
+                  // If text looks like a provider name (doesn't contain common non-provider words)
+                  const lowerText = text.toLowerCase();
+                  if (!lowerText.includes('game') && 
+                      !lowerText.includes('slot') && 
+                      !lowerText.includes('play') &&
+                      !lowerText.includes('free') &&
+                      !lowerText.includes('demo')) {
+                    gameInfo.provider = formatProviderName(text);
+                    break;
+                  }
+                }
+              }
+              if (gameInfo.provider) break;
+            } catch (e) {
+              // Ignore selector errors
             }
           }
-        } catch (e) {
-          // Ignore selector errors
+
+          // Also try searching page text for "by Provider" pattern near game title
+          if (!gameInfo.provider) {
+            const bodyText = document.body.textContent || '';
+            // Look for patterns like "by Pragmatic Play" or "Provider: Pragmatic Play"
+            const byPattern = /by\s+([A-Z][a-zA-Z\s]+?)(?:\s|$|,|\.)/g;
+            const providerMatch = bodyText.match(byPattern);
+            if (providerMatch && providerMatch[0]) {
+              const provider = providerMatch[0].replace(/^by\s+/i, '').trim().split(/[\s,\.]/)[0];
+              if (provider && provider.length > 2 && provider.length < 50) {
+                gameInfo.provider = formatProviderName(provider);
+              }
+            }
+          }
+        }
+      } else {
+        // Generic provider detection for other casinos
+        const providerSelectors = [
+          '[data-provider]',
+          '[data-game-provider]',
+          '.provider',
+          '.game-provider',
+          '[class*="provider"]',
+          'meta[name="game-provider"]',
+          'meta[name="provider"]',
+        ];
+
+        for (const selector of providerSelectors) {
+          try {
+            const element = document.querySelector(selector);
+            if (element) {
+              const provider = element.textContent?.trim() || 
+                             element.getAttribute('data-provider') || 
+                             element.getAttribute('data-game-provider') ||
+                             element.getAttribute('content');
+              if (provider && provider.length < 50) {
+                gameInfo.provider = formatProviderName(provider);
+                break;
+              }
+            }
+          } catch (e) {
+            // Ignore selector errors
+          }
         }
       }
     }
@@ -373,14 +552,41 @@
 
     // Send game info to background script
   function sendGameInfo() {
-    const gameInfo = extractGameInfo();
-    // Store in background for popup access
-    chrome.runtime.sendMessage({
-      type: 'GAME_DETECTED',
-      data: gameInfo
-    }).catch(() => {
-      // Ignore errors if background script not ready
-    });
+    // Check if extension runtime is still valid
+    try {
+      // Safely check if chrome.runtime exists and is valid
+      // Accessing chrome.runtime.id can throw if context is invalidated
+      let runtimeValid = false;
+      try {
+        runtimeValid = !!(chrome.runtime && chrome.runtime.id);
+      } catch (e) {
+        // Extension context invalidated, stop trying to send messages
+        return;
+      }
+      
+      if (!runtimeValid) {
+        // Extension context invalidated, stop trying to send messages
+        return;
+      }
+      
+      const gameInfo = extractGameInfo();
+      // Store in background for popup access
+      chrome.runtime.sendMessage({
+        type: 'GAME_DETECTED',
+        data: gameInfo
+      }, (response) => {
+        // Check for errors
+        if (chrome.runtime.lastError) {
+          // Extension context invalidated or other error
+          // Silently fail - extension may have been reloaded
+          return;
+        }
+      });
+    } catch (error) {
+      // Extension context invalidated - this happens when extension is reloaded
+      // Silently fail
+      return;
+    }
   }
 
   // Detect on page load (with slight delay to let page load)
@@ -416,10 +622,16 @@
   // Listen for requests from extension
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'HUNTMASTER_GET_GAME_INFO') {
-      const gameInfo = extractGameInfo();
-      sendResponse({ gameInfo });
+      try {
+        const gameInfo = extractGameInfo();
+        sendResponse({ gameInfo });
+      } catch (error) {
+        sendResponse({ error: error.message });
+      }
       return true; // Keep channel open for async response
     }
+    // Return false if we don't handle the message to avoid async response warning
+    return false;
   });
 })();
 

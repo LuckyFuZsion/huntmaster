@@ -2230,7 +2230,7 @@ ${slotListInfo}`
         </DialogContent>
       </Dialog>
       <Dialog open={isExtensionTokenDialogOpen} onOpenChange={setIsExtensionTokenDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Session Token Copied! ✓</DialogTitle>
             <DialogDescription>

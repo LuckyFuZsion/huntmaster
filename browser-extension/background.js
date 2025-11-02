@@ -27,6 +27,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       lastDetectedGame: message.data,
       lastDetectedTime: Date.now()
     });
+    sendResponse({ success: true });
+    return true; // Keep channel open for async response
   }
   
   if (message.type === 'GET_LAST_GAME') {
@@ -36,7 +38,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
   
-  return true;
+  // Return false if we don't handle the message to avoid async response warning
+  return false;
 });
 
 
