@@ -366,11 +366,19 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
               <div style={{ color: "#9ad97a", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Best Win: ${Number(gameBests.bestWinAmount).toFixed(2)}</div>
             )}
             {gameBests?.bestXWin != null && (
-              <div style={{ color: "#9ad97a", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 3 }}>Best X: {gameBests.bestXWin}x</div>
+              <div style={{ color: "#9ad97a", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Best X: {gameBests.bestXWin}x</div>
+            )}
+            {/* Add blank line after wins for consistent spacing */}
+            {(gameBests?.bestWinAmount != null || gameBests?.bestXWin != null) && (
+              <div style={{ height: Math.max(18, size * 0.11) * 1.2 }}></div>
             )}
             {/* Show message if no best wins data */}
             {(!gameBests?.bestWinAmount && !gameBests?.bestXWin) && (
-              <div style={{ color: "#9ad97a", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 3 }}>No wins recorded yet</div>
+              <>
+                <div style={{ color: "#9ad97a", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>No wins recorded yet</div>
+                <div style={{ height: Math.max(18, size * 0.11) * 1.2 }}></div>
+                <div style={{ height: Math.max(18, size * 0.11) * 1.2 }}></div>
+              </>
             )}
           </>
         )}
