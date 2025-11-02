@@ -386,19 +386,34 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
         {/* Screen 2: Game Info (Max Win, Volatility, Release Date) */}
         {!showBestWins && (
           <>
-            {game?.maxWin != null && String(game.maxWin).trim() !== "" && (
-              <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Max Win: {game.maxWin}</div>
-            )}
-            {game?.volatility != null && String(game.volatility).trim() !== "" && (
-              <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Volatility: {game.volatility}</div>
-            )}
-            {game?.releaseDate != null && String(game.releaseDate).trim() !== "" && (
-              <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 3 }}>Release Date: {formatReleaseDate(game.releaseDate)}</div>
-            )}
-            {/* Show message if no game info available */}
-            {!game?.maxWin && !game?.volatility && !game?.releaseDate && (
-              <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 3 }}>Game info not available</div>
-            )}
+            {(() => {
+              const hasMaxWin = game?.maxWin != null && String(game.maxWin).trim() !== "";
+              const hasVolatility = game?.volatility != null && String(game.volatility).trim() !== "";
+              const hasReleaseDate = game?.releaseDate != null && String(game.releaseDate).trim() !== "";
+              const missingCount = (hasMaxWin ? 0 : 1) + (hasVolatility ? 0 : 1) + (hasReleaseDate ? 0 : 1);
+              
+              return (
+                <>
+                  {hasMaxWin && (
+                    <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Max Win: {game.maxWin}</div>
+                  )}
+                  {hasVolatility && (
+                    <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Volatility: {game.volatility}</div>
+                  )}
+                  {hasReleaseDate && (
+                    <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Release Date: {formatReleaseDate(game.releaseDate)}</div>
+                  )}
+                  {/* Show message if no game info available */}
+                  {!hasMaxWin && !hasVolatility && !hasReleaseDate && (
+                    <div style={{ color: "#ddd", fontSize: Math.max(18, size * 0.11), lineHeight: 1.2, marginBottom: 2 }}>Game info not available</div>
+                  )}
+                  {/* Add blank lines for missing fields */}
+                  {Array.from({ length: missingCount }).map((_, idx) => (
+                    <div key={idx} style={{ height: Math.max(18, size * 0.11) * 1.2 }}></div>
+                  ))}
+                </>
+              );
+            })()}
           </>
         )}
         {error && <div style={{ color: "#f66", fontSize: Math.max(16, size * 0.1), lineHeight: 1.2 }}>{error}</div>}
