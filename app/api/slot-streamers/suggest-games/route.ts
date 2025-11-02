@@ -34,14 +34,29 @@ export async function GET(request: Request) {
     const data = await res.json();
     const items = Array.isArray(data?.data) ? data.data : [];
 
-    const suggestions = items.map((g: any) => ({
-      id: g.id,
-      slug: g.slug,
-      title: g.title,
-      provider: g.developer,
-      thumbnail: g.thumbnail_url || g.banner_url || null,
-      maxWin: g.max_win ?? g.max_win_x ?? g.max_win_multiplier ?? g.maxwin ?? undefined,
-    }));
+    const suggestions = items.map((g: any) => {
+      // Check both top-level and nested features.technical_specs for max_win
+      const maxWinVal = g.max_win ?? 
+                       g.max_win_x ?? 
+                       g.max_win_multiplier ?? 
+                       g.maxwin ??
+                       g.features?.technical_specs?.max_win;
+      
+      // Check both top-level and nested features.technical_specs for volatility
+      const volatilityVal = g.volatility ?? 
+                           g.features?.technical_specs?.volatility;
+      
+      return {
+        id: g.id,
+        slug: g.slug,
+        title: g.title,
+        provider: g.developer,
+        thumbnail: g.thumbnail_url || g.banner_url || null,
+        maxWin: (maxWinVal && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
+        volatility: (volatilityVal && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
+        releaseDate: (g.release_date && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
+      };
+    });
 
     return NextResponse.json({ success: true, data: suggestions, total: data?.pagination?.total, limit });
   } catch (error) {

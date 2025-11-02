@@ -33,24 +33,52 @@ export async function GET(request: Request) {
     const ssItems: any[] = Array.isArray(ssJson?.data) ? ssJson.data : [];
     const slGames: any[] = Array.isArray(slJson?.games) ? slJson.games : [];
 
-    const mappedSL = slGames.map((g) => ({
-      id: Number(g.id) || g.id,
-      slug: g.slug || g.name?.toLowerCase().replace(/\s+/g, "-") || String(g.id),
-      title: g.name,
-      provider: g.provider || g.provider_slug || undefined,
-      thumbnail: g.thumbnail_url || g.banner_url || null,
-      maxWin: g.max_win ?? undefined,
-    }));
-
-    // Prefer SlotsLaunch results (which may include maxWin) over game reviews
-    const combined = [...mappedSL, ...ssItems];
-    const seen = new Set<string>();
-    const deduped = combined.filter((it) => {
-      const key = (it.slug || it.title || "").toLowerCase() + "|" + (it.provider || "").toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+    const mappedSL = slGames.map((g) => {
+      // Check multiple possible field names for max_win in SlotsLaunch API
+      const maxWinVal = g.max_win ?? 
+                       g.max_win_x ?? 
+                       g.max_win_multiplier ?? 
+                       g.maxwin ??
+                       g.maximum_win ??
+                       g.max_win_amount;
+      
+      return {
+        id: Number(g.id) || g.id,
+        slug: g.slug || g.name?.toLowerCase().replace(/\s+/g, "-") || String(g.id),
+        title: g.name,
+        provider: g.provider || g.provider_slug || undefined,
+        thumbnail: g.thumbnail_url || g.banner_url || null,
+        maxWin: (maxWinVal && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
+        volatility: (g.volatility && String(g.volatility).trim() !== "") ? String(g.volatility).trim() : undefined,
+        releaseDate: (g.release_date && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
+      };
     });
+
+    // Combine results and merge data - prefer versions with more complete data
+    const combined = [...mappedSL, ...ssItems];
+    const seen = new Map<string, any>();
+    
+    // Merge duplicates, preferring data from whichever source has more complete info
+    combined.forEach((it) => {
+      const key = (it.slug || it.title || "").toLowerCase() + "|" + (it.provider || "").toLowerCase();
+      const existing = seen.get(key);
+      
+      if (!existing) {
+        seen.set(key, it);
+      } else {
+        // Merge: prefer non-empty values, and combine data from both sources
+        const merged = { ...existing };
+        // Update fields if the new item has a value and existing doesn't
+        if (!merged.maxWin && it.maxWin) merged.maxWin = it.maxWin;
+        if (!merged.volatility && it.volatility) merged.volatility = it.volatility;
+        if (!merged.releaseDate && it.releaseDate) merged.releaseDate = it.releaseDate;
+        if (!merged.provider && it.provider) merged.provider = it.provider;
+        if (!merged.thumbnail && it.thumbnail) merged.thumbnail = it.thumbnail;
+        seen.set(key, merged);
+      }
+    });
+    
+    const deduped = Array.from(seen.values());
 
     // Include minimal pagination hint from SlotsLaunch if present
     const pagination = slJson?.total_pages

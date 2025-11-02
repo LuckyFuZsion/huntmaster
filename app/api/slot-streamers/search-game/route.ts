@@ -67,13 +67,29 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: [], count: 0 });
     }
 
+    // Check both top-level and nested features.technical_specs for max_win
+    const maxWinVal = (best as any).max_win ?? 
+                     (best as any).max_win_x ?? 
+                     (best as any).max_win_multiplier ?? 
+                     (best as any).maxwin ??
+                     (best as any).features?.technical_specs?.max_win;
+    
+    // Check both top-level and nested features.technical_specs for volatility
+    const volatilityVal = (best as any).volatility ?? 
+                         (best as any).features?.technical_specs?.volatility;
+    
     const simplified = {
       id: best.id,
       slug: best.slug,
       title: best.title,
       provider: best.developer,
       thumbnail: best.thumbnail_url || best.banner_url || null,
-      maxWin: (best as any).max_win ?? (best as any).max_win_x ?? (best as any).max_win_multiplier ?? (best as any).maxwin ?? undefined,
+      maxWin: (maxWinVal && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
+      volatility: (volatilityVal && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
+      releaseDate: (() => {
+        const val = (best as any).release_date;
+        return (val && String(val).trim() !== "") ? String(val).trim() : undefined;
+      })(),
     };
 
     return NextResponse.json({ success: true, data: [simplified], count: candidates.length });

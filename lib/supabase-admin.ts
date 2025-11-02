@@ -1,10 +1,42 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Server-side Supabase client with service role key (if available) or anon key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+function getSupabaseConfig() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-const supabaseClient = createClient(supabaseUrl, supabaseKey)
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Missing Supabase environment variables for admin client:', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseKey,
+      hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    })
+    throw new Error('Supabase configuration is missing. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) environment variables.')
+  }
+
+  return { supabaseUrl, supabaseKey }
+}
+
+let supabaseClient: ReturnType<typeof createClient> | null = null
+
+function getSupabaseAdminClient() {
+  if (!supabaseClient) {
+    try {
+      const { supabaseUrl, supabaseKey } = getSupabaseConfig()
+      supabaseClient = createClient(supabaseUrl, supabaseKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        }
+      })
+    } catch (error) {
+      console.error('Failed to initialize Supabase admin client:', error)
+      throw error
+    }
+  }
+  return supabaseClient
+}
 
 // Helper function to normalize user data (handle both camelCase and snake_case)
 function normalizeUser(user: any): User {
@@ -110,14 +142,14 @@ export const supabaseAdmin = {
   users: {
     async findAll(): Promise<User[]> {
       // Try camelCase first, then snake_case
-      let { data, error } = await supabaseClient
+      let { data, error } = await getSupabaseAdminClient()
         .from('users')
         .select('*')
         .order('createdAt', { ascending: false })
       
       // If camelCase fails, try snake_case
       if (error && (error.code === '42703' || error.message?.includes('column'))) {
-        const result = await supabaseClient
+        const result = await getSupabaseAdminClient()
           .from('users')
           .select('*')
           .order('created_at', { ascending: false })
@@ -130,7 +162,7 @@ export const supabaseAdmin = {
     },
     
     async findOne(id: string): Promise<User | null> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('users')
         .select('*')
         .eq('id', id)
@@ -144,7 +176,7 @@ export const supabaseAdmin = {
     },
     
     async findByUsername(username: string): Promise<User | null> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('users')
         .select('*')
         .eq('username', username)
@@ -159,7 +191,7 @@ export const supabaseAdmin = {
     
     async findByDiscordId(discordId: string): Promise<User | null> {
       // Try camelCase first, then snake_case
-      let { data, error } = await supabaseClient
+      let { data, error } = await getSupabaseAdminClient()
         .from('users')
         .select('*')
         .eq('discordId', discordId)
@@ -167,7 +199,7 @@ export const supabaseAdmin = {
       
       // If camelCase fails, try snake_case
       if (error && (error.code === '42703' || error.message?.includes('column'))) {
-        const result = await supabaseClient
+        const result = await getSupabaseAdminClient()
           .from('users')
           .select('*')
           .eq('discord_id', discordId)
@@ -200,7 +232,7 @@ export const supabaseAdmin = {
         insertData.huntmaster = userData.huntmaster ?? false
         insertData.huntmasterAdmin = userData.huntmasterAdmin ?? false
         
-        const { data, error } = await supabaseClient
+        const { data, error } = await getSupabaseAdminClient()
           .from('users')
           .insert(insertData)
           .select()
@@ -224,7 +256,7 @@ export const supabaseAdmin = {
             created_at: new Date().toISOString(),
           }
           
-          const { data: snakeData, error: snakeError } = await supabaseClient
+          const { data: snakeData, error: snakeError } = await getSupabaseAdminClient()
             .from('users')
             .insert(snakeCaseData)
             .select()
@@ -242,7 +274,7 @@ export const supabaseAdmin = {
     
     async update(id: string, updateData: Partial<Omit<User, 'id'>>): Promise<void> {
       // Try camelCase first
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('users')
         .update(updateData)
         .eq('id', id)
@@ -259,7 +291,7 @@ export const supabaseAdmin = {
         if (updateData.password !== undefined) snakeCaseData.password = updateData.password
         if (updateData.username !== undefined) snakeCaseData.username = updateData.username
         
-        const { error: snakeError } = await supabaseClient
+        const { error: snakeError } = await getSupabaseAdminClient()
           .from('users')
           .update(snakeCaseData)
           .eq('id', id)
@@ -271,7 +303,7 @@ export const supabaseAdmin = {
     },
     
     async delete(id: string): Promise<void> {
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('users')
         .delete()
         .eq('id', id)
@@ -283,7 +315,7 @@ export const supabaseAdmin = {
   // Slot operations
   slots: {
     async findAll(): Promise<Slot[]> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('slots')
         .select('*')
         .order('createdAt', { ascending: true })
@@ -293,7 +325,7 @@ export const supabaseAdmin = {
     },
     
     async findByUserId(userId: string): Promise<Slot[]> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('slots')
         .select('*')
         .eq('userId', userId)
@@ -304,7 +336,7 @@ export const supabaseAdmin = {
     },
     
     async findOne(id: string): Promise<Slot | null> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('slots')
         .select('*')
         .eq('id', id)
@@ -318,7 +350,7 @@ export const supabaseAdmin = {
     },
     
     async create(slotData: Omit<Slot, 'id' | 'createdAt'>): Promise<Slot> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('slots')
         .insert({
           ...slotData,
@@ -340,7 +372,7 @@ export const supabaseAdmin = {
       if (data.userId !== undefined) updateData["userId"] = data.userId
       if (data.createdAt !== undefined) updateData["createdAt"] = data.createdAt
       
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('slots')
         .update(updateData)
         .eq('id', id)
@@ -352,7 +384,7 @@ export const supabaseAdmin = {
     },
     
     async delete(id: string): Promise<void> {
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('slots')
         .delete()
         .eq('id', id)
@@ -361,7 +393,7 @@ export const supabaseAdmin = {
     },
     
     async deleteAllByUserId(userId: string): Promise<void> {
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('slots')
         .delete()
         .eq('userId', userId)
@@ -373,7 +405,7 @@ export const supabaseAdmin = {
   // User Settings operations
   userSettings: {
     async findByUserId(userId: string): Promise<UserSettings | null> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('userSettings')
         .select('*')
         .eq('userId', userId)
@@ -406,7 +438,7 @@ export const supabaseAdmin = {
       
       if (existing) {
         // Update existing settings
-        const { error: updateError } = await supabaseClient
+        const { error: updateError } = await getSupabaseAdminClient()
           .from('userSettings')
           .update(updateData)
           .eq('userId', userId)
@@ -417,7 +449,7 @@ export const supabaseAdmin = {
         }
       } else {
         // Create new settings if they don't exist
-        const { error: insertError } = await supabaseClient
+        const { error: insertError } = await getSupabaseAdminClient()
           .from('userSettings')
           .insert({
             userId,
@@ -435,7 +467,7 @@ export const supabaseAdmin = {
   // User Wins operations
   userWins: {
     async create(win: Omit<UserWin, 'id' | 'createdAt'>): Promise<UserWin> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('userWins')
         .insert({
           ...win,
@@ -449,7 +481,7 @@ export const supabaseAdmin = {
     },
     
     async findBestByUserAndGame(userId: string, gameTitleOrSlug: string): Promise<{ bestWinAmount: number | null; bestXWin: number | null }> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('userWins')
         .select('winAmount, xWin')
         .eq('userId', userId)
@@ -464,7 +496,7 @@ export const supabaseAdmin = {
       }
       
       // Also find best X win
-      const { data: xWinData, error: xWinError } = await supabaseClient
+      const { data: xWinData, error: xWinError } = await getSupabaseAdminClient()
         .from('userWins')
         .select('xWin')
         .eq('userId', userId)
@@ -482,7 +514,7 @@ export const supabaseAdmin = {
     
     async findOverallBestByUser(userId: string): Promise<{ bestWinAmount: number | null; bestXWin: number | null; bestWinGame?: string; bestXWinGame?: string }> {
       // Get all wins for user, ordered by winAmount descending
-      const { data: winAmountData, error: winAmountError } = await supabaseClient
+      const { data: winAmountData, error: winAmountError } = await getSupabaseAdminClient()
         .from('userWins')
         .select('winAmount, gameTitle')
         .eq('userId', userId)
@@ -492,7 +524,7 @@ export const supabaseAdmin = {
       if (winAmountError) throw winAmountError
       
       // Get all wins for user, ordered by xWin descending
-      const { data: xWinData, error: xWinError } = await supabaseClient
+      const { data: xWinData, error: xWinError } = await getSupabaseAdminClient()
         .from('userWins')
         .select('xWin, gameTitle')
         .eq('userId', userId)
@@ -513,7 +545,7 @@ export const supabaseAdmin = {
   // Current Game operations
   currentGame: {
     async findByUserId(userId: string): Promise<CurrentGame | null> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('currentGame')
         .select('*')
         .eq('userId', userId)
@@ -527,7 +559,7 @@ export const supabaseAdmin = {
     },
     
     async upsert(gameData: Omit<CurrentGame, 'id' | 'updatedAt'>): Promise<CurrentGame> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('currentGame')
         .upsert({
           ...gameData,
@@ -543,7 +575,7 @@ export const supabaseAdmin = {
     },
     
     async delete(userId: string): Promise<void> {
-      const { error } = await supabaseClient
+      const { error } = await getSupabaseAdminClient()
         .from('currentGame')
         .delete()
         .eq('userId', userId)
@@ -552,7 +584,7 @@ export const supabaseAdmin = {
     },
     
     async set(userId: string, gameTitle: string, provider?: string): Promise<CurrentGame> {
-      const { data, error } = await supabaseClient
+      const { data, error } = await getSupabaseAdminClient()
         .from('currentGame')
         .upsert({
           userId,

@@ -49,7 +49,16 @@ export default function BonusHuntGameWidget({ title: titleProp, provider: provid
   // Update title from real-time slots (prioritize next slot from hunt list)
   // This effect runs whenever slots change (including when wins are recorded)
   useEffect(() => {
+    console.log("BonusHuntGameWidget: useEffect triggered", {
+      username,
+      titleProp,
+      slotsLength: slots?.length,
+      slotsLoading,
+      slots: slots?.map(s => ({ name: s.name, win: s.win }))
+    });
+    
     if (!username || titleProp) {
+      console.log("BonusHuntGameWidget: Skipping - no username or titleProp override");
       setAutoTitle(null);
       return;
     }
@@ -61,25 +70,40 @@ export default function BonusHuntGameWidget({ title: titleProp, provider: provid
     // - Slots are deleted
     if (slots && slots.length > 0) {
       const nextSlotName = findNextSlot(slots);
+      console.log("BonusHuntGameWidget: Found next slot:", {
+        nextSlotName,
+        totalSlots: slots.length,
+        slotsWithNullWin: slots.filter(s => s.win === null || s.win === undefined).map(s => s.name),
+        currentAutoTitle: autoTitle
+      });
+      
       if (nextSlotName) {
-        console.log("Next slot found from real-time slots:", nextSlotName, "Total slots:", slots.length);
+        if (nextSlotName !== autoTitle) {
+          console.log("BonusHuntGameWidget: Updating autoTitle from", autoTitle, "to", nextSlotName);
         setAutoTitle(nextSlotName);
+        } else {
+          console.log("BonusHuntGameWidget: Next slot unchanged:", nextSlotName);
+        }
         return;
       } else {
         // No next slot found - all bonuses opened
-        console.log("No next slot found - all bonuses opened. Total slots:", slots.length);
+        console.log("BonusHuntGameWidget: No next slot found - all bonuses opened. Total slots:", slots.length);
+        if (autoTitle !== null) {
         setAutoTitle(null);
+        }
       }
     } else if (slots && slots.length === 0) {
       // No slots at all
-      console.log("No slots found for user");
+      console.log("BonusHuntGameWidget: No slots found for user");
+      if (autoTitle !== null) {
       setAutoTitle(null);
-    } else if (!slotsLoading) {
-      // Slots loaded but empty, or still loading
-      console.log("Slots loading or empty");
-      setAutoTitle(null);
+      }
+    } else if (slotsLoading) {
+      // Still loading - don't do anything yet
+      console.log("BonusHuntGameWidget: Slots still loading");
     } else {
-      // Slots not loaded yet - fetch from API as initial load
+      // Slots not loaded yet or undefined - fetch from API as initial load
+      console.log("BonusHuntGameWidget: Fetching initial next slot from API");
       let cancelled = false;
       
       async function loadNextSlot() {
@@ -88,6 +112,8 @@ export default function BonusHuntGameWidget({ title: titleProp, provider: provid
           const data = await res.json();
           if (cancelled) return;
           
+          console.log("BonusHuntGameWidget: API response:", data);
+          
           if (data?.success && data?.data?.title) {
             setAutoTitle(data.data.title);
           } else {
@@ -95,7 +121,7 @@ export default function BonusHuntGameWidget({ title: titleProp, provider: provid
           }
         } catch (error) {
           if (!cancelled) {
-            console.error("Error loading next slot:", error);
+            console.error("BonusHuntGameWidget: Error loading next slot:", error);
             setAutoTitle(null);
           }
         }
@@ -104,7 +130,7 @@ export default function BonusHuntGameWidget({ title: titleProp, provider: provid
       loadNextSlot();
       return () => { cancelled = true; };
     }
-  }, [username, titleProp, slots, findNextSlot]);
+  }, [username, titleProp, slots, slotsLoading, findNextSlot]);
   
   // Use real-time subscription for current game as fallback only
   const { currentGame } = useSupabaseCurrentGame(username && !titleProp ? username : null);

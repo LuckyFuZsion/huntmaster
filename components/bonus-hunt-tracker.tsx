@@ -319,9 +319,9 @@ export function BonusHuntTracker() {
         // Only set previousSettingsRef if we actually have values to protect
         // Don't store empty strings as "previous" values
         if (loadedStartBalance || loadedEndBalance) {
-          previousSettingsRef.current = {
-            startBalance: loadedStartBalance,
-            endBalance: loadedEndBalance
+        previousSettingsRef.current = {
+          startBalance: loadedStartBalance,
+          endBalance: loadedEndBalance
           }
         }
       }
@@ -392,7 +392,7 @@ export function BonusHuntTracker() {
         // Preserve existing state if database value is null/undefined/empty
         if (settings.startBalance != null && settings.startBalance !== "") {
           const loadedStartBalance = String(settings.startBalance)
-          setStartBalance(loadedStartBalance)
+        setStartBalance(loadedStartBalance)
           console.log("Updated startBalance from database:", loadedStartBalance)
         } else {
           console.log("Database startBalance is null/empty, preserving existing state:", startBalance)
@@ -400,7 +400,7 @@ export function BonusHuntTracker() {
         
         if (settings.endBalance != null && settings.endBalance !== "") {
           const loadedEndBalance = String(settings.endBalance)
-          setEndBalance(loadedEndBalance)
+        setEndBalance(loadedEndBalance)
           console.log("Updated endBalance from database:", loadedEndBalance)
         } else {
           console.log("Database endBalance is null/empty, preserving existing state:", endBalance)
@@ -1242,15 +1242,15 @@ ${slotListInfo}`
               <>
             <div className="flex flex-row space-x-2">
               <div className="flex flex-row space-x-1 w-1/2">
-                <Input
-                  type="number"
-                  placeholder="Start Balance"
-                  value={startBalance}
-                  disabled={!canEdit}
-                  onChange={(e) => {
-                    if (canEdit) {
-                      const val = e.target.value
-                      setStartBalance(val)
+              <Input
+                type="number"
+                placeholder="Start Balance"
+                value={startBalance}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  if (canEdit) {
+                    const val = e.target.value
+                    setStartBalance(val)
                     }
                   }}
                   className={`flex-1 ${noSpinnerClass}`}
@@ -1270,15 +1270,15 @@ ${slotListInfo}`
                 </Button>
               </div>
               <div className="flex flex-row space-x-1 w-1/2">
-                <Input
-                  type="number"
-                  placeholder="End Balance"
-                  value={endBalance}
-                  disabled={!canEdit}
-                  onChange={(e) => {
-                    if (canEdit) {
-                      const val = e.target.value
-                      setEndBalance(val === "" ? "" : val)
+              <Input
+                type="number"
+                placeholder="End Balance"
+                value={endBalance}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  if (canEdit) {
+                    const val = e.target.value
+                    setEndBalance(val === "" ? "" : val)
                     }
                   }}
                   className={`flex-1 ${noSpinnerClass}`}
@@ -1865,7 +1865,7 @@ ${slotListInfo}`
                         variant="outline"
                         onClick={handleUpdateNowPlaying}
                         disabled={isUpdatingGame || !selectedLiveGame}
-                        className="flex-1"
+                        className="flex-1 text-sm"
                       >
                         {isUpdatingGame ? "Updating..." : "Update Now Playing"}
                       </Button>

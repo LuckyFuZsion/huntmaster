@@ -126,8 +126,27 @@ export function useSupabaseSlotsByUsername(username: string | null) {
         (payload) => {
           // Only process if it matches our user's slots
           const changedSlot = payload.new || payload.old
+          
+          console.log('Real-time slot event received:', {
+            eventType: payload.eventType,
+            slotId: changedSlot?.id,
+            slotName: changedSlot?.name,
+            slotUserId: changedSlot?.userId,
+            ourUserId: userIdRef.current,
+            username,
+            prevWin: payload.old?.win,
+            newWin: payload.new?.win
+          })
+          
+          // If userId not loaded yet, reload to get it and process the change
+          if (!userIdRef.current && changedSlot) {
+            console.log('Received real-time event but userId not loaded yet, reloading to get latest data:', payload.eventType)
+            debouncedReload()
+            return
+          }
+          
           if (changedSlot && changedSlot.userId === userIdRef.current) {
-            console.log('Slot change detected for', username, ':', payload.eventType, {
+            console.log('Slot change matches our user - processing:', payload.eventType, {
               slotId: changedSlot.id,
               slotName: changedSlot.name,
               win: payload.new?.win ?? payload.old?.win,
@@ -158,6 +177,7 @@ export function useSupabaseSlotsByUsername(username: string | null) {
               setSlots((prev) => {
                 const updated = prev.map((slot) => (slot.id === updatedSlot.id ? updatedSlot : slot))
                 console.log('Slot updated via real-time:', updatedSlot.name, 'Win changed from', payload.old?.win, 'to', updatedSlot.win)
+                console.log('Updated slots array length:', updated.length, 'Next slot with null win:', updated.find(s => s.win === null || s.win === undefined)?.name)
                 return updated
               })
             } else if (payload.eventType === 'DELETE' && payload.old) {
@@ -166,6 +186,12 @@ export function useSupabaseSlotsByUsername(username: string | null) {
               // For batch operations or uncertainty, reload after debounce
               debouncedReload()
             }
+          } else {
+            console.log('Slot event filtered out - wrong user:', {
+              slotUserId: changedSlot?.userId,
+              ourUserId: userIdRef.current,
+              username
+            })
           }
         }
       )
