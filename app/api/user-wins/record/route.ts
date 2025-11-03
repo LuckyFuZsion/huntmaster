@@ -116,18 +116,35 @@ export async function POST(request: Request) {
       // Continue - we'll allow the save but log the error
     }
 
+    // Log verification result for debugging
+    console.log('Game verification result:', {
+      gameExists,
+      gameTitle: gameTitleTrimmed,
+      provider,
+      verificationError
+    });
+
+    // If game doesn't exist, log but still allow save (games might be added later)
+    // We'll just log a warning instead of blocking
     if (!gameExists) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: verificationError || "Game not found in database. Please select a game from the autocomplete dropdown.",
-          details: {
-            gameTitle: gameTitleTrimmed,
-            verificationError
-          }
-        },
-        { status: 400 }
-      );
+      console.warn('⚠️ Game not found in database, but allowing save anyway:', {
+        gameTitle: gameTitleTrimmed,
+        provider,
+        verificationError,
+        note: 'Win will be saved but may not appear in widgets until game is added to database'
+      });
+      // Don't block the save - just warn
+      // return NextResponse.json(
+      //   { 
+      //     success: false, 
+      //     error: verificationError || "Game not found in database. Please select a game from the autocomplete dropdown.",
+      //     details: {
+      //       gameTitle: gameTitleTrimmed,
+      //       verificationError
+      //     }
+      //   },
+      //   { status: 400 }
+      // );
     }
 
     // Calculate X win
@@ -158,21 +175,56 @@ export async function POST(request: Request) {
 
     let created;
     try {
+      console.log('📝 Attempting to create win record with:', winRecord);
       created = await supabaseAdmin.userWins.create(winRecord);
-      console.log('✅ Win record created successfully:', created.id);
-    } catch (createError) {
-      console.error('❌ Error creating win record:', createError);
-      throw new Error(`Failed to save win to database: ${createError instanceof Error ? createError.message : String(createError)}`);
+      console.log('✅ Win record created successfully:', {
+        id: created.id,
+        userId,
+        gameTitle: created.gameTitle,
+        winAmount: created.winAmount,
+        xWin: created.xWin,
+        provider: created.provider
+      });
+    } catch (createError: any) {
+      console.error('❌ Error creating win record:', {
+        error: createError,
+        message: createError?.message,
+        code: createError?.code,
+        details: createError?.details,
+        hint: createError?.hint,
+        winRecord
+      });
+      
+      // Return detailed error to client
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Failed to save win to database: ${createError?.message || String(createError)}`,
+          details: {
+            code: createError?.code,
+            hint: createError?.hint,
+            message: createError?.message
+          }
+        },
+        { status: 500 }
+      );
     }
 
     // Also update the corresponding slot in the slots table to trigger real-time updates
     // This allows widgets to instantly see the win without polling
     try {
       const slots = await supabaseAdmin.slots.findByUserId(userId);
-      // Find slot matching the game title (case-insensitive)
-      const matchingSlot = slots.find(slot => 
-        slot.name.toLowerCase().trim() === gameTitleTrimmed.toLowerCase()
-      );
+      console.log(`🔍 Searching for matching slot. Total slots: ${slots.length}, Looking for: "${gameTitleTrimmed}"`);
+      
+      // Find slot matching the game title (case-insensitive, flexible matching)
+      const matchingSlot = slots.find(slot => {
+        const slotName = slot.name.toLowerCase().trim();
+        const searchName = gameTitleTrimmed.toLowerCase().trim();
+        // Exact match or one contains the other
+        return slotName === searchName || 
+               slotName.includes(searchName) || 
+               searchName.includes(slotName);
+      });
       
       if (matchingSlot) {
         // Update the slot's win field - this will trigger real-time subscription
@@ -180,14 +232,15 @@ export async function POST(request: Request) {
           win: winAmount,
           bet: bet, // Also update bet in case it changed
         });
-        console.log(`✅ Updated slot ${matchingSlot.id} (${matchingSlot.name}) with win: ${winAmount}`);
+        console.log(`✅ Updated slot ${matchingSlot.id} (${matchingSlot.name}) with win: ${winAmount}, bet: ${bet}`);
       } else {
-        console.log(`⚠️ No matching slot found for game: ${gameTitleTrimmed}. Slot may not exist yet.`);
+        console.log(`⚠️ No matching slot found for game: "${gameTitleTrimmed}". Available slots:`, 
+          slots.map(s => s.name).slice(0, 5));
         // Slot might not exist yet - that's okay, the win is still recorded
       }
     } catch (slotUpdateError) {
       // Log error but don't fail the request - win is already recorded
-      console.error("Error updating slot after recording win:", slotUpdateError);
+      console.error("❌ Error updating slot after recording win:", slotUpdateError);
     }
 
     return NextResponse.json({

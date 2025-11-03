@@ -136,8 +136,13 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null
       }
-      // Reload immediately for instant updates
-      loadBestWinsRef.current()
+      
+      // Small delay to ensure database commit is complete
+      // But still fast enough for instant user experience
+      setTimeout(() => {
+        console.log('🔄 Reloading best wins after win change detected')
+        loadBestWinsRef.current()
+      }, 100) // 100ms delay to ensure DB commit is complete
     }
 
     // Subscribe to real-time changes for userWins
@@ -197,20 +202,23 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
           // 1. If userId matches AND title matches -> reload (best case, most accurate)
           // 2. If userId matches but title doesn't -> still reload (title might have slight variations, and best wins are per-game anyway)
           // 3. If no userId yet but title matches -> reload (will get userId on reload)
+          // 4. For INSERT events, be more lenient - reload if title matches even without userId
           // This ensures we catch all relevant wins even with title variations
+          const isInsert = payload.eventType === 'INSERT'
           const shouldReload = userIdRef.current 
-            ? userIdMatches // If we have userId, reload on any event for this user (title matching is handled on reload)
-            : titleMatches; // If no userId yet, reload if title matches (even partially)
+            ? userIdMatches // If we have userId, reload on any event for this user
+            : (titleMatches || (isInsert && titleMatches)); // If no userId yet, reload if title matches
           
           if (shouldReload) {
-            console.log('User wins change detected for', gameTitle, ':', payload.eventType, 'Updating immediately', {
+            console.log('✅ User wins change detected for', gameTitle, ':', payload.eventType, 'Updating immediately', {
               winAmount: payload.new?.winAmount,
               xWin: payload.new?.xWin,
               currentBestWin: bestWinsRef.current?.bestWinAmount,
               currentBestX: bestWinsRef.current?.bestXWin,
               hasUserId: !!userIdRef.current,
               titleMatches,
-              userIdMatches
+              userIdMatches,
+              isInsert
             })
             // Update immediately for instant feedback
             handleWinChange()
@@ -221,7 +229,7 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
               console.log('Stored userId from event payload for future filtering:', userIdRef.current)
             }
           } else {
-            console.log('User wins event filtered out:', {
+            console.log('⚠️ User wins event filtered out:', {
               titleMatches,
               userIdMatches,
               payloadGameTitle,
@@ -229,6 +237,7 @@ export function useSupabaseUserWinsByGame(username: string | null, gameTitle: st
               payloadUserId: changedWin.userId,
               ourUserId: userIdRef.current,
               username,
+              isInsert,
               reason: !titleMatches ? 'title mismatch' : !userIdMatches ? 'userId mismatch' : 'unknown'
             })
           }

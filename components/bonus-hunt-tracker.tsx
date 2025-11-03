@@ -1129,9 +1129,7 @@ ${slotListInfo}`
         }),
       })
       const data = await response.json()
-      if (data.success) {
-        alert(`✓ Now Playing updated to: ${selectedLiveGame.title}`)
-      } else {
+      if (!data.success) {
         alert(`Failed to update: ${data.error || "Unknown error"}`)
       }
     } catch (error) {
@@ -1204,7 +1202,6 @@ ${slotListInfo}`
 
       // Clear win amount, keep game and stake
       setLiveGame({ ...liveGame, win: "" })
-      alert(`Win recorded! ${winAmount} (${bet > 0 ? (winAmount / bet).toFixed(2) : "0"}x)`)
     } catch (error) {
       console.error("Error recording win:", error)
       alert("Failed to record win. Please try again.")

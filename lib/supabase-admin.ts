@@ -467,17 +467,48 @@ export const supabaseAdmin = {
   // User Wins operations
   userWins: {
     async create(win: Omit<UserWin, 'id' | 'createdAt'>): Promise<UserWin> {
-      const { data, error } = await getSupabaseAdminClient()
-        .from('userWins')
-        .insert({
-          ...win,
-          createdAt: new Date().toISOString(),
-        })
-        .select()
-        .single()
-      
-      if (error) throw error
-      return data
+      try {
+        console.log('Attempting to insert userWin:', {
+          userId: win.userId,
+          gameTitle: win.gameTitle,
+          bet: win.bet,
+          winAmount: win.winAmount,
+          xWin: win.xWin,
+          provider: win.provider
+        });
+        
+        const { data, error } = await getSupabaseAdminClient()
+          .from('userWins')
+          .insert({
+            ...win,
+            createdAt: new Date().toISOString(),
+          })
+          .select()
+          .single()
+        
+        if (error) {
+          console.error('❌ Supabase insert error:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            winData: win
+          });
+          throw error;
+        }
+        
+        console.log('✅ UserWin inserted successfully:', {
+          id: data.id,
+          userId: data.userId,
+          gameTitle: data.gameTitle,
+          winAmount: data.winAmount
+        });
+        
+        return data;
+      } catch (err) {
+        console.error('❌ Error in userWins.create:', err);
+        throw err;
+      }
     },
     
     async findBestByUserAndGame(userId: string, gameTitleOrSlug: string): Promise<{ bestWinAmount: number | null; bestXWin: number | null }> {

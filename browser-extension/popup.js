@@ -284,6 +284,13 @@ async function recordWin() {
     if (data.success) {
       const xWin = stake > 0 ? (winAmount / stake).toFixed(2) : '0.00';
       showStatus(`✓ Win recorded! ${winAmount} (${xWin}x)`, 'success');
+      console.log('✅ Win recorded successfully:', {
+        id: data.data?.id,
+        gameTitle: data.data?.gameTitle,
+        winAmount: data.data?.winAmount,
+        xWin: data.data?.xWin,
+        bet: data.data?.bet
+      });
       // Clear win amount (keep stake for next round)
       document.getElementById('win-amount').value = '';
       userEditedWinAmount = false; // Reset edit flag after successful save
