@@ -5,8 +5,9 @@
 ### Option 1: Chrome/Edge (Easiest)
 
 1. **Download the Extension:**
-   - Download the entire `browser-extension` folder as a ZIP file
+   - Download the `huntmaster-extension.zip` file
    - Extract it to a location you remember (e.g., `C:\Extensions\huntmaster-extension\`)
+   - Make sure all files are extracted, including manifest.json, popup.html, popup.js, and icon files
 
 2. **Open Extensions Page:**
    - Open Chrome or Edge
