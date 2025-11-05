@@ -265,15 +265,15 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ width: size, height: size, borderRadius: size * 0.15, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <div style={{ width: size * 1.5, height: size, borderRadius: size * 0.15, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         {thumbnailUrl && !imageError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img 
             src={thumbnailUrl} 
             alt={game?.title || "Game"} 
-            width={size} 
+            width={size * 1.5} 
             height={size} 
-            style={{ objectFit: "cover", width: "100%", height: "100%" }}
+            style={{ objectFit: "contain", width: "100%", height: "100%" }}
             onError={() => {
               console.error("Failed to load proxied image:", thumbnailUrl);
               setImageError(true);
