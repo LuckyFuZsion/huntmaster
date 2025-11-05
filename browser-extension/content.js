@@ -164,14 +164,23 @@
         }
         
         // Pattern without provider: "Play Game Name" or "Play Game Name for free."
+        // Also handle simple cases like "Play Oops" with no additional text
         const withoutProviderPattern = /^Play\s+(.+?)(?:\s+for\s+free.*?|$)/i;
         const withoutProviderMatch = title.match(withoutProviderPattern);
         if (withoutProviderMatch) {
-          const gameTitle = withoutProviderMatch[1].trim();
+          let gameTitle = withoutProviderMatch[1].trim();
           // Remove trailing period and "for free"
-          const cleanedTitle = gameTitle.replace(/\.$/, '').replace(/\s+for\s+free$/i, '').trim();
+          gameTitle = gameTitle.replace(/\.$/, '').replace(/\s+for\s+free$/i, '').trim();
           // Use provider from URL if available
-          return { title: cleanedTitle, provider: providerFromUrl };
+          return { title: gameTitle, provider: providerFromUrl };
+        }
+        
+        // Fallback: if nothing else matched, just remove "Play" prefix and return the rest
+        const simplePlayPattern = /^Play\s+(.+)$/i;
+        const simplePlayMatch = title.match(simplePlayPattern);
+        if (simplePlayMatch) {
+          const gameTitle = simplePlayMatch[1].trim();
+          return { title: gameTitle, provider: providerFromUrl };
         }
       }
     }
@@ -283,6 +292,11 @@
           gameInfo.title = pageTitle;
           gameInfo.source = 'page-title-fallback';
         }
+      }
+      
+      // Final safety check: For CryptoCasino, remove "Play" prefix from any extracted title if present
+      if (casino === 'cryptocasino' && gameInfo.title && gameInfo.title.match(/^Play\s+/i)) {
+        gameInfo.title = gameInfo.title.replace(/^Play\s+/i, '').trim();
       }
     }
 

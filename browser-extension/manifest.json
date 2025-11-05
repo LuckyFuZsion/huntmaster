@@ -3,6 +3,7 @@
   "name": "HuntMaster Game Detector",
   "version": "1.0.0",
   "description": "Automatically detects the game you're playing on casino sites and updates your HuntMaster Now Playing widget",
+  "homepage_url": "https://huntmaster.vercel.app",
   "permissions": [
     "activeTab",
     "storage",

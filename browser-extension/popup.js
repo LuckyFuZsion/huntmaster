@@ -6,8 +6,6 @@ const SESSION_TOKEN_KEY = 'huntmaster_session_token';
 let currentGameInfo = null;
 let userEditedWinAmount = false; // Track if user manually edited win amount
 let userEditedStakeAmount = false; // Track if user manually edited stake amount
-let userEditedGameTitle = false; // Track if user manually edited game title
-let userEditedGameProvider = false; // Track if user manually edited game provider
 
 // Decrypt session token to extract username
 function decryptSession(sessionToken) {
@@ -172,30 +170,19 @@ function updateDetectedGame(title, provider, source) {
   const providerEl = document.getElementById('detected-provider');
   const sourceEl = document.getElementById('detected-source');
   
-  gameEl.textContent = title;
-  gameEl.className = title === 'Not detected' || title === 'Detecting...' ? 'game-info-value empty' : 'game-info-value';
+  // Only update if not being edited by user (check if element is focused)
+  if (document.activeElement !== gameEl) {
+    gameEl.textContent = title;
+    gameEl.className = title === 'Not detected' || title === 'Detecting...' ? 'game-info-value editable empty' : 'game-info-value editable';
+  }
   
-  providerEl.textContent = provider;
-  providerEl.className = provider === '-' ? 'game-info-value empty' : 'game-info-value';
+  if (document.activeElement !== providerEl) {
+    providerEl.textContent = provider;
+    providerEl.className = provider === '-' ? 'game-info-value editable empty' : 'game-info-value editable';
+  }
   
   sourceEl.textContent = source;
   sourceEl.className = source === '-' ? 'game-info-value empty' : 'game-info-value';
-
-  // Auto-fill manual entry if detected, but only if user hasn't manually edited these fields
-  if (title && title !== 'Not detected' && title !== 'Detecting...' && !userEditedGameTitle) {
-    const gameTitleInput = document.getElementById('game-title');
-    // Only auto-fill if field is empty
-    if (!gameTitleInput.value || gameTitleInput.value.trim() === '') {
-      gameTitleInput.value = title;
-    }
-  }
-  if (provider && provider !== '-' && !userEditedGameProvider) {
-    const gameProviderInput = document.getElementById('game-provider');
-    // Only auto-fill if field is empty
-    if (!gameProviderInput.value || gameProviderInput.value.trim() === '') {
-      gameProviderInput.value = provider;
-    }
-  }
 }
 
 // Calculate and display X win
@@ -215,7 +202,7 @@ function updateXWin() {
   }
 }
 
-// Record win to API
+  // Record win to API
 async function recordWin() {
   const { apiBaseUrl, sessionToken } = await loadConfig();
   
@@ -224,13 +211,18 @@ async function recordWin() {
     return;
   }
 
-  const gameTitle = document.getElementById('game-title').value.trim();
-  const provider = document.getElementById('game-provider').value.trim();
+  const gameTitle = document.getElementById('detected-game').textContent.trim();
+  const provider = document.getElementById('detected-provider').textContent.trim();
   const stake = parseFloat(document.getElementById('stake-amount').value);
   const winAmount = parseFloat(document.getElementById('win-amount').value);
 
   if (!gameTitle) {
     showStatus('Game title is required', 'error');
+    return;
+  }
+
+  if (gameTitle === 'Detecting...' || gameTitle === 'Not detected') {
+    showStatus('Please wait for game detection or edit the game title', 'error');
     return;
   }
 
@@ -246,7 +238,7 @@ async function recordWin() {
 
   const recordBtn = document.getElementById('record-win-btn');
   recordBtn.disabled = true;
-  recordBtn.textContent = 'Recording...';
+  recordBtn.innerHTML = '<span>Recording...</span>';
 
   try {
     const response = await fetch(`${apiBaseUrl}/api/user-wins/record`, {
@@ -294,7 +286,6 @@ async function recordWin() {
       // Clear win amount (keep stake for next round)
       document.getElementById('win-amount').value = '';
       userEditedWinAmount = false; // Reset edit flag after successful save
-      // Note: We don't reset game title/provider flags - user's manual entries should persist
       updateXWin();
     } else {
       // Show detailed error message
@@ -310,7 +301,7 @@ async function recordWin() {
     showStatus(`Error: ${error.message || 'Network error or server unavailable'}`, 'error');
   } finally {
     recordBtn.disabled = false;
-    recordBtn.textContent = '💰 Record Win';
+    recordBtn.innerHTML = '<span>💰 Record Win</span>';
   }
 }
 
@@ -330,7 +321,7 @@ async function updateCurrentGame(gameTitle, provider) {
 
   const updateBtn = document.getElementById('update-btn');
   updateBtn.disabled = true;
-  updateBtn.textContent = 'Updating...';
+  updateBtn.innerHTML = '<span>Updating...</span>';
 
   try {
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
@@ -356,7 +347,7 @@ async function updateCurrentGame(gameTitle, provider) {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     updateBtn.disabled = false;
-    updateBtn.textContent = 'Update Current Game';
+    updateBtn.innerHTML = '<span>Update Current Game</span>';
   }
 }
 
@@ -371,7 +362,7 @@ async function clearCurrentGame() {
 
   const clearBtn = document.getElementById('clear-btn');
   clearBtn.disabled = true;
-  clearBtn.textContent = 'Clearing...';
+  clearBtn.innerHTML = '<span>Clearing...</span>';
 
   try {
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
@@ -389,11 +380,8 @@ async function clearCurrentGame() {
 
     if (data.success) {
       showStatus('✓ Current game cleared', 'success');
-      document.getElementById('game-title').value = '';
-      document.getElementById('game-provider').value = '';
-      // Reset edit flags so auto-fill can work again
-      userEditedGameTitle = false;
-      userEditedGameProvider = false;
+      // Reset detected game display
+      updateDetectedGame('Not detected', '-', '-');
     } else {
       showStatus(`Error: ${data.error || 'Failed to clear game'}`, 'error');
     }
@@ -401,21 +389,45 @@ async function clearCurrentGame() {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     clearBtn.disabled = false;
-    clearBtn.textContent = 'Clear Current Game';
+    clearBtn.innerHTML = '<span>Clear Current Game</span>';
   }
 }
 
 // Show status message
 function showStatus(message, type = 'info') {
   const statusEl = document.getElementById('status');
-  statusEl.textContent = message;
-  statusEl.className = `status ${type}`;
-  
-  if (type === 'success' || type === 'error') {
-    setTimeout(() => {
-      statusEl.textContent = '';
-      statusEl.className = 'status';
-    }, 3000);
+  if (message) {
+    statusEl.textContent = message;
+    statusEl.className = `status ${type}`;
+    
+    if (type === 'success' || type === 'error') {
+      setTimeout(() => {
+        statusEl.textContent = '';
+        statusEl.className = 'status';
+      }, 3000);
+    }
+  } else {
+    statusEl.textContent = '';
+    statusEl.className = 'status';
+  }
+}
+
+// Open extension in a separate window that stays open
+async function openInWindow() {
+  try {
+    const url = chrome.runtime.getURL('popup.html');
+    await chrome.windows.create({
+      url: url,
+      type: 'normal',
+      width: 420,
+      height: 850,
+      focused: true
+    });
+    // Close the current popup after opening the window
+    window.close();
+  } catch (error) {
+    console.error('Error opening window:', error);
+    showStatus('Failed to open window', 'error');
   }
 }
 
@@ -424,24 +436,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
   await detectGame();
 
+  // Open in window button
+  document.getElementById('open-window-btn').addEventListener('click', openInWindow);
+
   // Refresh detection
   document.getElementById('refresh-btn').addEventListener('click', () => {
     updateDetectedGame('Detecting...', '-', '-');
     detectGame();
   });
 
-  // Update game
+  // Update game - use detected game info
   document.getElementById('update-btn').addEventListener('click', () => {
-    const gameTitle = document.getElementById('game-title').value;
-    const provider = document.getElementById('game-provider').value;
-    updateCurrentGame(gameTitle, provider);
-  });
-
-  // Use detected game
-  document.addEventListener('click', (e) => {
-    if (e.target.id === 'use-detected-btn' && currentGameInfo && currentGameInfo.title) {
-      updateCurrentGame(currentGameInfo.title, currentGameInfo.provider);
+    const gameTitle = document.getElementById('detected-game').textContent.trim();
+    const provider = document.getElementById('detected-provider').textContent.trim();
+    
+    // Don't update if game title is empty or placeholder
+    if (!gameTitle || gameTitle === 'Detecting...' || gameTitle === 'Not detected' || gameTitle === '') {
+      showStatus('Please wait for game detection or edit the game title', 'error');
+      return;
     }
+    
+    updateCurrentGame(gameTitle, provider === '-' ? undefined : provider);
   });
 
   // Clear game
@@ -484,25 +499,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateXWin();
   });
 
-  // Track manual edits for game title and provider
-  document.getElementById('game-title').addEventListener('input', (e) => {
-    const value = e.target.value.trim();
-    if (value === '') {
-      // User manually cleared the field - allow auto-fill again
-      userEditedGameTitle = false;
-    } else {
-      // User entered a value - don't auto-fill anymore
-      userEditedGameTitle = true;
+  // Handle editable game title and provider fields
+  const gameEl = document.getElementById('detected-game');
+  const providerEl = document.getElementById('detected-provider');
+  
+  // Prevent empty contenteditable elements
+  gameEl.addEventListener('blur', () => {
+    if (!gameEl.textContent.trim() || gameEl.textContent.trim() === '') {
+      gameEl.textContent = gameEl.getAttribute('data-placeholder') || 'Not detected';
     }
   });
-  document.getElementById('game-provider').addEventListener('input', (e) => {
-    const value = e.target.value.trim();
-    if (value === '') {
-      // User manually cleared the field - allow auto-fill again
-      userEditedGameProvider = false;
-    } else {
-      // User entered a value - don't auto-fill anymore
-      userEditedGameProvider = true;
+  
+  providerEl.addEventListener('blur', () => {
+    if (!providerEl.textContent.trim() || providerEl.textContent.trim() === '') {
+      providerEl.textContent = providerEl.getAttribute('data-placeholder') || '-';
     }
   });
 
