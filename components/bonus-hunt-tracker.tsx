@@ -1089,6 +1089,14 @@ ${slotListInfo}`
           setTimeout(() => {
             setBalanceSavedState((prev) => ({ ...prev, start: false }))
           }, 2000)
+          // Clear editing state for this field after successful save
+          if (lastUserEditRef.current) {
+            delete lastUserEditRef.current.startBalance
+            // Only clear editing flag if end balance is also not being edited
+            if (!lastUserEditRef.current.endBalance) {
+              userEditingRef.current = false
+            }
+          }
         } else {
           previousSettingsRef.current.endBalance = endBalance || ""
           setBalanceSavedState({ ...balanceSavedState, end: true })
@@ -1096,6 +1104,14 @@ ${slotListInfo}`
           setTimeout(() => {
             setBalanceSavedState((prev) => ({ ...prev, end: false }))
           }, 2000)
+          // Clear editing state for this field after successful save
+          if (lastUserEditRef.current) {
+            delete lastUserEditRef.current.endBalance
+            // Only clear editing flag if start balance is also not being edited
+            if (!lastUserEditRef.current.startBalance) {
+              userEditingRef.current = false
+            }
+          }
         }
         console.log(`Balance saved successfully:`, balanceType, settingsToSave)
       } else {
@@ -1248,8 +1264,32 @@ ${slotListInfo}`
                   if (canEdit) {
                     const val = e.target.value
                     setStartBalance(val)
+                    // Mark that user is editing to prevent real-time updates from overwriting
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.startBalance = val
                     }
                   }}
+                onBlur={() => {
+                  // Stop tracking editing when user leaves the field
+                  // But keep the value in lastUserEditRef in case they come back
+                  if (lastUserEditRef.current && !lastUserEditRef.current.endBalance) {
+                    // Only clear editing flag if end balance is also not being edited
+                    userEditingRef.current = false
+                  }
+                }}
+                onFocus={() => {
+                  // Mark as editing when user focuses on the field
+                  if (canEdit) {
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.startBalance = startBalance
+                  }
+                }}
                   className={`flex-1 ${noSpinnerClass}`}
                 />
                 <Button
@@ -1276,8 +1316,32 @@ ${slotListInfo}`
                   if (canEdit) {
                     const val = e.target.value
                     setEndBalance(val === "" ? "" : val)
+                    // Mark that user is editing to prevent real-time updates from overwriting
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.endBalance = val === "" ? "" : val
                     }
                   }}
+                onBlur={() => {
+                  // Stop tracking editing when user leaves the field
+                  // But keep the value in lastUserEditRef in case they come back
+                  if (lastUserEditRef.current && !lastUserEditRef.current.startBalance) {
+                    // Only clear editing flag if start balance is also not being edited
+                    userEditingRef.current = false
+                  }
+                }}
+                onFocus={() => {
+                  // Mark as editing when user focuses on the field
+                  if (canEdit) {
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.endBalance = endBalance
+                  }
+                }}
                   className={`flex-1 ${noSpinnerClass}`}
                 />
                 <Button
