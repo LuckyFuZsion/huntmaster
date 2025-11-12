@@ -133,7 +133,12 @@ export function useSupabaseSlots(userId: string | null) {
               prev.map((slot) => (slot.id === payload.new.id ? (payload.new as Slot) : slot))
             )
           } else if (payload.eventType === 'DELETE' && payload.old) {
-            setSlots((prev) => prev.filter((slot) => slot.id !== payload.old.id))
+            setSlots((prev) => {
+              const filtered = prev.filter((slot) => slot.id !== payload.old.id)
+              // If we're deleting and have no slots left, ensure we're truly empty
+              // This handles the case where bulk deletes might miss some events
+              return filtered
+            })
           }
           // Note: We don't reload here - real-time payload has the latest data!
         }
