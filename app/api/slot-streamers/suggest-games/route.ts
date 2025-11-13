@@ -35,16 +35,41 @@ export async function GET(request: Request) {
     const items = Array.isArray(data?.data) ? data.data : [];
 
     const suggestions = items.map((g: any) => {
-      // Check both top-level and nested features.technical_specs for max_win
+      // Check multiple possible locations for max_win
+      // According to API docs: can be top-level or in features.technical_specs
       const maxWinVal = g.max_win ?? 
                        g.max_win_x ?? 
                        g.max_win_multiplier ?? 
                        g.maxwin ??
-                       g.features?.technical_specs?.max_win;
+                       g.maximum_win ??
+                       g.max_win_amount ??
+                       g.features?.technical_specs?.max_win ??
+                       g.features?.max_win ??
+                       g.technical_specs?.max_win;
       
-      // Check both top-level and nested features.technical_specs for volatility
+      // Check multiple possible locations for volatility
+      // According to API docs: can be top-level or in features.technical_specs
       const volatilityVal = g.volatility ?? 
-                           g.features?.technical_specs?.volatility;
+                           g.volatility_level ??
+                           g.features?.technical_specs?.volatility ??
+                           g.features?.volatility ??
+                           g.technical_specs?.volatility;
+      
+      // Log the raw game data for "Oracle of Gold" to debug missing fields
+      if (g.title && g.title.toLowerCase().includes("oracle of gold")) {
+        console.log("🔍 Oracle of Gold - Raw API data:", JSON.stringify(g, null, 2));
+        console.log("🔍 Extracted values:", {
+          maxWinVal,
+          volatilityVal,
+          releaseDate: g.release_date,
+          hasFeatures: !!g.features,
+          hasTechnicalSpecs: !!g.technical_specs,
+          featuresKeys: g.features ? Object.keys(g.features) : [],
+          technicalSpecsKeys: g.technical_specs ? Object.keys(g.technical_specs) : [],
+          allKeys: Object.keys(g),
+          featuresStructure: g.features ? JSON.stringify(g.features, null, 2) : null
+        });
+      }
       
       return {
         id: g.id,
@@ -52,9 +77,9 @@ export async function GET(request: Request) {
         title: g.title,
         provider: g.developer,
         thumbnail: g.thumbnail_url || g.banner_url || null,
-        maxWin: (maxWinVal && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
-        volatility: (volatilityVal && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
-        releaseDate: (g.release_date && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
+        maxWin: (maxWinVal != null && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
+        volatility: (volatilityVal != null && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
+        releaseDate: (g.release_date != null && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
       };
     });
 

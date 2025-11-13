@@ -74,6 +74,17 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
         const res = await fetch(suggestUrl, { cache: "no-store" });
         const data = await res.json();
         if (cancelled) return;
+        
+        // Log which API was used (from metadata if available)
+        if (data.metadata) {
+          console.log('GameWidgetDisplay: API usage', {
+            primarySource: data.metadata.primarySource,
+            usedFallback: data.metadata.usedFallback,
+            slotStreamersResults: data.metadata.slotStreamersResults,
+            slotsLaunchResults: data.metadata.slotsLaunchResults
+          });
+        }
+        
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
           // Only use game data if there's an exact title match (case-insensitive)
           const titleLower = title.toLowerCase().trim();
@@ -88,7 +99,8 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
               maxWin: exactMatch.maxWin,
               volatility: exactMatch.volatility,
               releaseDate: exactMatch.releaseDate,
-              provider: exactMatch.provider
+              provider: exactMatch.provider,
+              source: data.metadata?.primarySource || 'unknown'
             });
             setGame(exactMatch);
             setImageError(false);
@@ -96,41 +108,21 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
             return;
           }
           // No exact match found - game doesn't exist in database
+          console.log('GameWidgetDisplay: No exact match found in results', {
+            title: title,
+            resultsCount: data.data.length,
+            searchedIn: data.metadata?.primarySource || 'unknown'
+          });
           setGame(null);
           setImageError(false);
           if (!cancelled) setLoading(false);
           return;
         } else {
-          // Fallback: try legacy single-source search (only if not in cache)
-          const params = new URLSearchParams();
-          params.set("title", title);
-          if (effectiveProvider) params.set("provider", effectiveProvider);
-          params.set("limit", "5");
-          const legacy = await fetch(`/api/slot-streamers/search-game?${params.toString()}`, { cache: "no-store" });
-          const legacyJson = await legacy.json();
-          if (!cancelled && legacyJson.success && Array.isArray(legacyJson.data) && legacyJson.data.length > 0) {
-            // Only use game data if there's an exact title match
-            const titleLower = title.toLowerCase().trim();
-            const exactMatch = legacyJson.data.find((it: any) => 
-              it.title?.toLowerCase().trim() === titleLower
-            );
-            if (exactMatch) {
-              // Cache the result
-              gameDataCacheRef.current.set(cacheKey, exactMatch);
-              console.log('GameWidgetDisplay: Loaded game data (fallback)', {
-                title: exactMatch.title,
-                maxWin: exactMatch.maxWin,
-                volatility: exactMatch.volatility,
-                releaseDate: exactMatch.releaseDate,
-                provider: exactMatch.provider
-              });
-              setGame(exactMatch);
-              setImageError(false);
-              if (!cancelled) setLoading(false);
-              return;
-            }
-          }
-          // No exact match found in either search
+          // No results from /api/slots-suggest (which already tried both APIs)
+          console.log('GameWidgetDisplay: No results from API', {
+            title: title,
+            searchedIn: data.metadata?.primarySource || 'none'
+          });
           setGame(null);
           setImageError(false);
         }

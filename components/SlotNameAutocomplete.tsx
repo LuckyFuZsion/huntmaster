@@ -24,6 +24,8 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
   const [items, setItems] = useState<Suggestion[]>([]);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const justSelectedRef = useRef(false); // Track if we just selected an item
+  const lastSelectedValueRef = useRef<string>(""); // Track the last selected value
 
   const queryUrl = useMemo(() => {
     if (!value || value.trim().length < minChars) return null;
@@ -32,6 +34,13 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
   }, [value, minChars]);
 
   useEffect(() => {
+    // Don't search if we just selected an item and the value matches the selection
+    if (justSelectedRef.current && value === lastSelectedValueRef.current) {
+      justSelectedRef.current = false; // Reset flag after one skip
+      setOpen(false); // Keep dropdown closed
+      return;
+    }
+
     let cancelled = false;
     const handler = setTimeout(async () => {
       if (!queryUrl) {
@@ -44,12 +53,38 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
         const res = await fetch(queryUrl, { cache: "no-store" });
         const data = await res.json();
         if (cancelled) return;
+        
+        // Check for rate limiting
+        if (data.rateLimited || data.warnings) {
+          console.warn('SlotNameAutocomplete: API rate limited', {
+            warnings: data.warnings,
+            query: value
+          });
+          // Still try to show any partial results we got
+        }
+        
         const list: Suggestion[] = data?.data || [];
-        setItems(list);
-        setOpen(list.length > 0);
+        
+        // Deduplicate items by title (case-insensitive) to prevent duplicates
+        const seen = new Map<string, Suggestion>();
+        const deduplicated: Suggestion[] = [];
+        for (const item of list) {
+          const key = item.title.toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.set(key, item);
+            deduplicated.push(item);
+          }
+        }
+        
+        setItems(deduplicated);
+        // Only open dropdown if user is actively typing (not after selection)
+        if (!justSelectedRef.current) {
+          setOpen(deduplicated.length > 0);
+        }
         setHighlight(0);
-      } catch {
+      } catch (error) {
         if (!cancelled) {
+          console.error('SlotNameAutocomplete: Error fetching suggestions', error);
           setItems([]);
           setOpen(false);
         }
@@ -62,7 +97,7 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
       cancelled = true;
       clearTimeout(handler);
     };
-  }, [queryUrl]);
+  }, [queryUrl, value]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -75,9 +110,19 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
   }, []);
 
   function selectItem(item: Suggestion) {
+    // Mark that we just selected an item to prevent immediate re-search
+    justSelectedRef.current = true;
+    lastSelectedValueRef.current = item.title;
+    
     onChange(item.title);
     onSelect?.(item);
     setOpen(false);
+    setItems([]); // Clear items to prevent dropdown from reopening
+    
+    // Reset the flag after a short delay to allow normal searching again
+    setTimeout(() => {
+      justSelectedRef.current = false;
+    }, 500);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -102,7 +147,12 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onFocus={() => items.length > 0 && setOpen(true)}
+        onFocus={() => {
+          // Only open if we have items and didn't just select
+          if (items.length > 0 && !justSelectedRef.current) {
+            setOpen(true);
+          }
+        }}
         onKeyDown={onKeyDown}
         className="w-full border rounded px-3 py-2 bg-background text-foreground"
       />

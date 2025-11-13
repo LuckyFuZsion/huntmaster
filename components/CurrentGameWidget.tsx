@@ -101,6 +101,26 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
         const res = await fetch(suggestUrl, { cache: "no-store" });
         const data = await res.json();
         if (cancelled) return;
+        
+        // Check for rate limiting warnings
+        if (data.rateLimited || data.warnings) {
+          console.warn('CurrentGameWidget: API rate limited', {
+            warnings: data.warnings,
+            title: effectiveTitle
+          });
+          // Continue to try to use any data we got, even if partial
+        }
+        
+        // Log which API was used (from metadata if available)
+        if (data.metadata) {
+          console.log('CurrentGameWidget: API usage', {
+            primarySource: data.metadata.primarySource,
+            usedFallback: data.metadata.usedFallback,
+            slotStreamersResults: data.metadata.slotStreamersResults,
+            slotsLaunchResults: data.metadata.slotsLaunchResults
+          });
+        }
+        
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
           // Only use game data if there's an exact title match (case-insensitive)
           const titleLower = effectiveTitle.toLowerCase().trim();
@@ -115,7 +135,8 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
               maxWin: exactMatch.maxWin,
               volatility: exactMatch.volatility,
               releaseDate: exactMatch.releaseDate,
-              provider: exactMatch.provider
+              provider: exactMatch.provider,
+              source: data.metadata?.primarySource || 'unknown'
             });
             setGame(exactMatch);
             setImageError(false);
@@ -123,41 +144,21 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
             return;
           }
           // No exact match found - game doesn't exist in database
+          console.log('CurrentGameWidget: No exact match found in results', {
+            title: effectiveTitle,
+            resultsCount: data.data.length,
+            searchedIn: data.metadata?.primarySource || 'unknown'
+          });
           setGame(null);
           setImageError(false);
           if (!cancelled) setLoading(false);
           return;
         } else {
-          // Fallback: try legacy single-source search (only if not in cache)
-          const params = new URLSearchParams();
-          params.set("title", effectiveTitle);
-          if (effectiveProvider) params.set("provider", effectiveProvider);
-          params.set("limit", "5");
-          const legacy = await fetch(`/api/slot-streamers/search-game?${params.toString()}`, { cache: "no-store" });
-          const legacyJson = await legacy.json();
-          if (!cancelled && legacyJson.success && Array.isArray(legacyJson.data) && legacyJson.data.length > 0) {
-            // Only use game data if there's an exact title match
-            const titleLower = effectiveTitle.toLowerCase().trim();
-            const exactMatch = legacyJson.data.find((it: any) => 
-              it.title?.toLowerCase().trim() === titleLower
-            );
-            if (exactMatch) {
-              // Cache the result
-              gameDataCacheRef.current.set(cacheKey, exactMatch);
-              console.log('CurrentGameWidget: Loaded game data (fallback)', {
-                title: exactMatch.title,
-                maxWin: exactMatch.maxWin,
-                volatility: exactMatch.volatility,
-                releaseDate: exactMatch.releaseDate,
-                provider: exactMatch.provider
-              });
-              setGame(exactMatch);
-              setImageError(false);
-              if (!cancelled) setLoading(false);
-              return;
-            }
-          }
-          // No exact match found in either search
+          // No results from /api/slots-suggest (which already tried both APIs)
+          console.log('CurrentGameWidget: No results from API', {
+            title: effectiveTitle,
+            searchedIn: data.metadata?.primarySource || 'none'
+          });
           setGame(null);
           setImageError(false);
         }
