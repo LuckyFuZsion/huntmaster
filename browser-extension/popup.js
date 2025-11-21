@@ -6,6 +6,8 @@ const SESSION_TOKEN_KEY = 'huntmaster_session_token';
 let currentGameInfo = null;
 let userEditedWinAmount = false; // Track if user manually edited win amount
 let userEditedStakeAmount = false; // Track if user manually edited stake amount
+let userEditedGameName = false; // Track if user manually edited game name
+let userEditedProvider = false; // Track if user manually edited provider
 
 // Decrypt session token to extract username
 function decryptSession(sessionToken) {
@@ -170,17 +172,19 @@ function updateDetectedGame(title, provider, source) {
   const providerEl = document.getElementById('detected-provider');
   const sourceEl = document.getElementById('detected-source');
   
-  // Only update if not being edited by user (check if element is focused)
-  if (document.activeElement !== gameEl) {
+  // Only update if user hasn't manually edited and field is not currently focused
+  if (!userEditedGameName && document.activeElement !== gameEl) {
     gameEl.textContent = title;
     gameEl.className = title === 'Not detected' || title === 'Detecting...' ? 'game-info-value editable empty' : 'game-info-value editable';
   }
   
-  if (document.activeElement !== providerEl) {
+  // Only update if user hasn't manually edited and field is not currently focused
+  if (!userEditedProvider && document.activeElement !== providerEl) {
     providerEl.textContent = provider;
     providerEl.className = provider === '-' ? 'game-info-value editable empty' : 'game-info-value editable';
   }
   
+  // Source can always be updated (it's not editable)
   sourceEl.textContent = source;
   sourceEl.className = source === '-' ? 'game-info-value empty' : 'game-info-value';
 }
@@ -382,6 +386,8 @@ async function clearCurrentGame() {
       showStatus('✓ Current game cleared', 'success');
       // Reset detected game display
       updateDetectedGame('Not detected', '-', '-');
+      // Clear the last auto-updated game so next detection will auto-update
+      chrome.storage.local.remove('lastAutoUpdatedGame');
     } else {
       showStatus(`Error: ${data.error || 'Failed to clear game'}`, 'error');
     }
@@ -503,16 +509,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   const gameEl = document.getElementById('detected-game');
   const providerEl = document.getElementById('detected-provider');
   
+  // Track when user manually edits game name
+  gameEl.addEventListener('input', () => {
+    userEditedGameName = true;
+  });
+  
+  // Track when user manually edits provider
+  providerEl.addEventListener('input', () => {
+    userEditedProvider = true;
+  });
+  
   // Prevent empty contenteditable elements
   gameEl.addEventListener('blur', () => {
-    if (!gameEl.textContent.trim() || gameEl.textContent.trim() === '') {
+    const wasEmpty = !gameEl.textContent.trim() || gameEl.textContent.trim() === '';
+    if (wasEmpty) {
       gameEl.textContent = gameEl.getAttribute('data-placeholder') || 'Not detected';
+      // If user cleared the field, allow auto-fill again
+      userEditedGameName = false;
     }
   });
   
   providerEl.addEventListener('blur', () => {
-    if (!providerEl.textContent.trim() || providerEl.textContent.trim() === '') {
+    const wasEmpty = !providerEl.textContent.trim() || providerEl.textContent.trim() === '';
+    if (wasEmpty) {
       providerEl.textContent = providerEl.getAttribute('data-placeholder') || '-';
+      // If user cleared the field, allow auto-fill again
+      userEditedProvider = false;
     }
   });
 

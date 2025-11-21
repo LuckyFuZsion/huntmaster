@@ -65,9 +65,10 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
   const suggestUrl = useMemo(() => {
     if (!effectiveTitle) return null;
     const p = new URLSearchParams();
+    // Try searching with the original title first
     p.set("q", effectiveTitle);
     if (effectiveProvider) p.set("provider", effectiveProvider);
-    p.set("limit", "10");
+    p.set("limit", "30"); // Increased limit for better chance of finding matches
     // exhaustive=1 ensures full-table search on SlotsLaunch side
     p.set("exhaustive", "1");
     return `/api/slots-suggest?${p.toString()}`;
@@ -78,8 +79,18 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
     async function load() {
       if (!suggestUrl || !effectiveTitle) return;
       
+      // Normalize title for cache key (remove hyphens, extra spaces)
+      const normalizeTitle = (title: string) => {
+        return title
+          .toLowerCase()
+          .trim()
+          .replace(/[-–—]/g, ' ') // Replace hyphens, en-dashes, em-dashes with spaces
+          .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+          .trim();
+      };
+      
       // Check cache first
-      const cacheKey = effectiveTitle.toLowerCase().trim();
+      const cacheKey = normalizeTitle(effectiveTitle);
       const cached = gameDataCacheRef.current.get(cacheKey);
       if (cached) {
         console.log('CurrentGameWidget: Using cached game data', {
@@ -122,11 +133,80 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
         }
         
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-          // Only use game data if there's an exact title match (case-insensitive)
-          const titleLower = effectiveTitle.toLowerCase().trim();
-          const exactMatch = data.data.find((it: any) => 
-            it.title?.toLowerCase().trim() === titleLower
-          );
+          // Normalize title for comparison (remove hyphens, extra spaces)
+          const normalizeTitle = (title: string) => {
+            return title
+              .toLowerCase()
+              .trim()
+              .replace(/[-–—]/g, ' ') // Replace hyphens, en-dashes, em-dashes with spaces
+              .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+              .trim();
+          };
+          
+          const normalizedTitle = normalizeTitle(effectiveTitle);
+          console.log('[CurrentGameWidget] Searching for game:', {
+            original: effectiveTitle,
+            normalized: normalizedTitle,
+            resultsCount: data.data.length,
+            firstFewResults: data.data.slice(0, 3).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) }))
+          });
+          
+          // Only use game data if there's an exact title match (case-insensitive, normalized)
+          let exactMatch = data.data.find((it: any) => {
+            if (!it.title) return false;
+            const normalizedGameTitle = normalizeTitle(it.title);
+            return normalizedGameTitle === normalizedTitle;
+          });
+          
+          if (exactMatch) {
+            console.log('[CurrentGameWidget] ✓ Found exact match in initial search:', exactMatch.title);
+          } else {
+            console.log('[CurrentGameWidget] No match in initial search, trying fallback...');
+          }
+          
+          // If not found, try searching again without the dash (fallback search)
+          if (!exactMatch) {
+            const titleWithoutDash = effectiveTitle.replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (titleWithoutDash !== effectiveTitle) {
+              console.log('[CurrentGameWidget] Trying fallback search without dash:', titleWithoutDash);
+              try {
+                const fallbackParams = new URLSearchParams();
+                fallbackParams.set('q', titleWithoutDash);
+                if (effectiveProvider) fallbackParams.set('provider', effectiveProvider);
+                fallbackParams.set('limit', '30');
+                fallbackParams.set('exhaustive', '1');
+                
+                const fallbackRes = await fetch(`/api/slots-suggest?${fallbackParams.toString()}`, { cache: 'no-store' });
+                const fallbackData = await fallbackRes.json();
+                
+                if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+                  console.log('[CurrentGameWidget] Fallback search returned', fallbackData.data.length, 'results');
+                  console.log('[CurrentGameWidget] First few fallback results:', fallbackData.data.slice(0, 5).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) })));
+                  
+                  exactMatch = fallbackData.data.find((it: any) => {
+                    if (!it.title) return false;
+                    const normalizedGameTitle = normalizeTitle(it.title);
+                    const matches = normalizedGameTitle === normalizedTitle;
+                    if (matches) {
+                      console.log('[CurrentGameWidget] ✓ Match found in fallback:', it.title, 'normalized:', normalizedGameTitle);
+                    }
+                    return matches;
+                  });
+                  
+                  if (exactMatch) {
+                    console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);
+                  } else {
+                    console.log('[CurrentGameWidget] ⚠️ No match found in fallback search. Normalized search term:', normalizedTitle);
+                    console.log('[CurrentGameWidget] Available normalized titles:', fallbackData.data.map((g: any) => normalizeTitle(g.title || '')));
+                  }
+                } else {
+                  console.log('[CurrentGameWidget] Fallback search returned no results');
+                }
+              } catch (fallbackError) {
+                console.error('[CurrentGameWidget] Fallback search error:', fallbackError);
+              }
+            }
+          }
           if (exactMatch) {
             // Cache the result
             gameDataCacheRef.current.set(cacheKey, exactMatch);
@@ -154,11 +234,65 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
           if (!cancelled) setLoading(false);
           return;
         } else {
-          // No results from /api/slots-suggest (which already tried both APIs)
-          console.log('CurrentGameWidget: No results from API', {
+          // No results from initial search - try fallback search without dash
+          console.log('CurrentGameWidget: No results from initial API search, trying fallback without dash', {
             title: effectiveTitle,
             searchedIn: data.metadata?.primarySource || 'none'
           });
+          
+          // Try searching again without the dash (fallback search)
+          const titleWithoutDash = effectiveTitle.replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (titleWithoutDash !== effectiveTitle) {
+            console.log('[CurrentGameWidget] Trying fallback search without dash:', titleWithoutDash);
+            try {
+              const fallbackParams = new URLSearchParams();
+              fallbackParams.set('q', titleWithoutDash);
+              if (effectiveProvider) fallbackParams.set('provider', effectiveProvider);
+              fallbackParams.set('limit', '30');
+              fallbackParams.set('exhaustive', '1');
+              
+              const fallbackRes = await fetch(`/api/slots-suggest?${fallbackParams.toString()}`, { cache: 'no-store' });
+              const fallbackData = await fallbackRes.json();
+              
+              if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+                console.log('[CurrentGameWidget] Fallback search returned', fallbackData.data.length, 'results');
+                
+                // Normalize title for comparison
+                const normalizeTitle = (title: string) => {
+                  return title
+                    .toLowerCase()
+                    .trim()
+                    .replace(/[-–—]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                };
+                
+                const normalizedTitle = normalizeTitle(effectiveTitle);
+                const exactMatch = fallbackData.data.find((it: any) => {
+                  if (!it.title) return false;
+                  const normalizedGameTitle = normalizeTitle(it.title);
+                  return normalizedGameTitle === normalizedTitle;
+                });
+                
+                if (exactMatch) {
+                  console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);
+                  const cacheKey = normalizeTitle(effectiveTitle);
+                  gameDataCacheRef.current.set(cacheKey, exactMatch);
+                  setGame(exactMatch);
+                  setImageError(false);
+                  if (!cancelled) setLoading(false);
+                  return;
+                } else {
+                  console.log('[CurrentGameWidget] ⚠️ No match found in fallback search');
+                }
+              } else {
+                console.log('[CurrentGameWidget] Fallback search returned no results');
+              }
+            } catch (fallbackError) {
+              console.error('[CurrentGameWidget] Fallback search error:', fallbackError);
+            }
+          }
+          
           setGame(null);
           setImageError(false);
         }
@@ -264,6 +398,9 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
   // Early return after all hooks
   if (!effectiveTitle) return null;
 
+  // Use database title if available (correct formatting), otherwise use detected title
+  const displayTitle = game?.title || effectiveTitle;
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <div style={{ width: size * 1.5, height: size, borderRadius: size * 0.15, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -310,23 +447,23 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
           {(() => {
             // Format title to ~20 characters per line, max 2 lines, breaking only at word boundaries
             const charsPerLine = 20;
-            if (effectiveTitle.length <= charsPerLine) {
-              return <span>{effectiveTitle}</span>;
+            if (displayTitle.length <= charsPerLine) {
+              return <span>{displayTitle}</span>;
             }
             
             // Find the last space before or at 20 characters for the first line
             let firstLineBreak = charsPerLine;
-            if (effectiveTitle.length > charsPerLine) {
+            if (displayTitle.length > charsPerLine) {
               // Look for the last space within the first 20 characters
-              const firstPart = effectiveTitle.substring(0, charsPerLine + 1);
+              const firstPart = displayTitle.substring(0, charsPerLine + 1);
               const lastSpaceIndex = firstPart.lastIndexOf(' ');
               if (lastSpaceIndex > 0 && lastSpaceIndex <= charsPerLine) {
                 firstLineBreak = lastSpaceIndex;
               }
             }
             
-            const firstLine = effectiveTitle.substring(0, firstLineBreak).trim();
-            const remaining = effectiveTitle.substring(firstLineBreak).trim();
+            const firstLine = displayTitle.substring(0, firstLineBreak).trim();
+            const remaining = displayTitle.substring(firstLineBreak).trim();
             
             if (remaining.length === 0) {
               return <span>{firstLine}</span>;

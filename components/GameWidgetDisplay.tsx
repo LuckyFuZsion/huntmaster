@@ -51,8 +51,18 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
     async function load() {
       if (!suggestUrl || !title) return;
       
+      // Normalize title for cache key (remove hyphens, extra spaces)
+      const normalizeTitle = (title: string) => {
+        return title
+          .toLowerCase()
+          .trim()
+          .replace(/[-–—]/g, ' ') // Replace hyphens, en-dashes, em-dashes with spaces
+          .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+          .trim();
+      };
+      
       // Check cache first
-      const cacheKey = title.toLowerCase().trim();
+      const cacheKey = normalizeTitle(title);
       const cached = gameDataCacheRef.current.get(cacheKey);
       if (cached) {
         console.log('GameWidgetDisplay: Using cached game data', {
@@ -86,11 +96,54 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
         }
         
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-          // Only use game data if there's an exact title match (case-insensitive)
-          const titleLower = title.toLowerCase().trim();
-          const exactMatch = data.data.find((it: any) => 
-            it.title?.toLowerCase().trim() === titleLower
-          );
+          // Normalize title for comparison (remove hyphens, extra spaces)
+          const normalizeTitle = (title: string) => {
+            return title
+              .toLowerCase()
+              .trim()
+              .replace(/[-–—]/g, ' ') // Replace hyphens, en-dashes, em-dashes with spaces
+              .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+              .trim();
+          };
+          
+          const normalizedTitle = normalizeTitle(title);
+          // Only use game data if there's an exact title match (case-insensitive, normalized)
+          let exactMatch = data.data.find((it: any) => {
+            if (!it.title) return false;
+            const normalizedGameTitle = normalizeTitle(it.title);
+            return normalizedGameTitle === normalizedTitle;
+          });
+          
+          // If not found, try searching again without the dash (fallback search)
+          if (!exactMatch) {
+            const titleWithoutDash = title.replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (titleWithoutDash !== title) {
+              console.log('[GameWidgetDisplay] No match found, trying fallback search without dash:', titleWithoutDash);
+              try {
+                const fallbackParams = new URLSearchParams();
+                fallbackParams.set('q', titleWithoutDash);
+                if (effectiveProvider) fallbackParams.set('provider', effectiveProvider);
+                fallbackParams.set('limit', '20');
+                fallbackParams.set('exhaustive', '1');
+                
+                const fallbackRes = await fetch(`/api/slots-suggest?${fallbackParams.toString()}`, { cache: 'no-store' });
+                const fallbackData = await fallbackRes.json();
+                
+                if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+                  exactMatch = fallbackData.data.find((it: any) => {
+                    if (!it.title) return false;
+                    const normalizedGameTitle = normalizeTitle(it.title);
+                    return normalizedGameTitle === normalizedTitle;
+                  });
+                  if (exactMatch) {
+                    console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);
+                  }
+                }
+              } catch (fallbackError) {
+                console.error('[GameWidgetDisplay] Fallback search error:', fallbackError);
+              }
+            }
+          }
           if (exactMatch) {
             // Cache the result
             gameDataCacheRef.current.set(cacheKey, exactMatch);
@@ -118,11 +171,65 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
           if (!cancelled) setLoading(false);
           return;
         } else {
-          // No results from /api/slots-suggest (which already tried both APIs)
-          console.log('GameWidgetDisplay: No results from API', {
+          // No results from initial search - try fallback search without dash
+          console.log('GameWidgetDisplay: No results from initial API search, trying fallback without dash', {
             title: title,
             searchedIn: data.metadata?.primarySource || 'none'
           });
+          
+          // Try searching again without the dash (fallback search)
+          const titleWithoutDash = title.replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (titleWithoutDash !== title) {
+            console.log('[GameWidgetDisplay] Trying fallback search without dash:', titleWithoutDash);
+            try {
+              const fallbackParams = new URLSearchParams();
+              fallbackParams.set('q', titleWithoutDash);
+              if (effectiveProvider) fallbackParams.set('provider', effectiveProvider);
+              fallbackParams.set('limit', '30');
+              fallbackParams.set('exhaustive', '1');
+              
+              const fallbackRes = await fetch(`/api/slots-suggest?${fallbackParams.toString()}`, { cache: 'no-store' });
+              const fallbackData = await fallbackRes.json();
+              
+              if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+                console.log('[GameWidgetDisplay] Fallback search returned', fallbackData.data.length, 'results');
+                
+                // Normalize title for comparison
+                const normalizeTitle = (title: string) => {
+                  return title
+                    .toLowerCase()
+                    .trim()
+                    .replace(/[-–—]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                };
+                
+                const normalizedTitle = normalizeTitle(title);
+                const exactMatch = fallbackData.data.find((it: any) => {
+                  if (!it.title) return false;
+                  const normalizedGameTitle = normalizeTitle(it.title);
+                  return normalizedGameTitle === normalizedTitle;
+                });
+                
+                if (exactMatch) {
+                  console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);
+                  const cacheKey = normalizeTitle(title);
+                  gameDataCacheRef.current.set(cacheKey, exactMatch);
+                  setGame(exactMatch);
+                  setImageError(false);
+                  if (!cancelled) setLoading(false);
+                  return;
+                } else {
+                  console.log('[GameWidgetDisplay] ⚠️ No match found in fallback search');
+                }
+              } else {
+                console.log('[GameWidgetDisplay] Fallback search returned no results');
+              }
+            } catch (fallbackError) {
+              console.error('[GameWidgetDisplay] Fallback search error:', fallbackError);
+            }
+          }
+          
           setGame(null);
           setImageError(false);
         }
@@ -244,6 +351,9 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
   // Early return after all hooks
   if (!title) return null;
 
+  // Use database title if available (correct formatting), otherwise use detected title
+  const displayTitle = game?.title || title;
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <div style={{ width: size * 1.5, height: size, borderRadius: size * 0.15, overflow: "hidden", background: "#111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -300,23 +410,23 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
           {(() => {
             // Format title to ~20 characters per line, max 2 lines, breaking only at word boundaries
             const charsPerLine = 20;
-            if (title.length <= charsPerLine) {
-              return <span>{title}</span>;
+            if (displayTitle.length <= charsPerLine) {
+              return <span>{displayTitle}</span>;
             }
             
             // Find the last space before or at 20 characters for the first line
             let firstLineBreak = charsPerLine;
-            if (title.length > charsPerLine) {
+            if (displayTitle.length > charsPerLine) {
               // Look for the last space within the first 20 characters
-              const firstPart = title.substring(0, charsPerLine + 1);
+              const firstPart = displayTitle.substring(0, charsPerLine + 1);
               const lastSpaceIndex = firstPart.lastIndexOf(' ');
               if (lastSpaceIndex > 0 && lastSpaceIndex <= charsPerLine) {
                 firstLineBreak = lastSpaceIndex;
               }
             }
             
-            const firstLine = title.substring(0, firstLineBreak).trim();
-            const remaining = title.substring(firstLineBreak).trim();
+            const firstLine = displayTitle.substring(0, firstLineBreak).trim();
+            const remaining = displayTitle.substring(firstLineBreak).trim();
             
             if (remaining.length === 0) {
               return <span>{firstLine}</span>;
