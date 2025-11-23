@@ -363,6 +363,23 @@ export const supabaseAdmin = {
       return data
     },
     
+    async createBatch(slotsData: Array<Omit<Slot, 'id' | 'createdAt'>>): Promise<Slot[]> {
+      if (slotsData.length === 0) return []
+      
+      const { data, error } = await getSupabaseAdminClient()
+        .from('slots')
+        .insert(
+          slotsData.map(slot => ({
+            ...slot,
+            createdAt: new Date().toISOString(),
+          }))
+        )
+        .select()
+      
+      if (error) throw error
+      return data || []
+    },
+    
     async update(id: string, data: Partial<Omit<Slot, 'id'>>): Promise<void> {
       // Convert camelCase to snake_case for database columns
       const updateData: any = {}

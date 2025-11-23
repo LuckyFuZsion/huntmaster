@@ -24,6 +24,11 @@ export function useSupabaseSlotsByUsername(username: string | null) {
   const userIdRef = useRef<string | null>(null)
   const loadingRef = useRef(false) // Prevent duplicate loads
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const loadSlotsRef = useRef<() => Promise<void>>()
+  const deleteEventCountRef = useRef(0) // Track rapid DELETE events (bulk delete)
+  const deleteEventTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const slotsCountRef = useRef(0) // Track current slots count for bulk delete detection
+  const insertReloadTimerRef = useRef<NodeJS.Timeout | null>(null) // Debounce reloads from INSERT events
 
   const loadSlots = useCallback(async () => {
     if (!username) {
@@ -71,6 +76,7 @@ export function useSupabaseSlotsByUsername(username: string | null) {
         }
         
         setSlots(uniqueSlots)
+        slotsCountRef.current = uniqueSlots.length // Update ref with current count
         // Extract userId from first slot if available
         if (uniqueSlots.length > 0 && uniqueSlots[0].userId) {
           userIdRef.current = uniqueSlots[0].userId
@@ -78,6 +84,7 @@ export function useSupabaseSlotsByUsername(username: string | null) {
         setError(null)
       } else {
         setSlots([])
+        slotsCountRef.current = 0
         userIdRef.current = null
       }
     } catch (err) {
@@ -89,6 +96,11 @@ export function useSupabaseSlotsByUsername(username: string | null) {
       loadingRef.current = false
     }
   }, [username])
+
+  // Keep ref updated with latest loadSlots function
+  useEffect(() => {
+    loadSlotsRef.current = loadSlots
+  }, [loadSlots])
 
   useEffect(() => {
     if (!username) {
@@ -108,7 +120,10 @@ export function useSupabaseSlotsByUsername(username: string | null) {
         clearTimeout(debounceTimerRef.current)
       }
       debounceTimerRef.current = setTimeout(() => {
-        loadSlots()
+        // Use ref to get latest loadSlots function
+        if (loadSlotsRef.current) {
+          loadSlotsRef.current()
+        }
       }, 500) // Wait 500ms after last change before reloading
     }
 
@@ -124,8 +139,24 @@ export function useSupabaseSlotsByUsername(username: string | null) {
           table: 'slots',
         },
         (payload) => {
+          // Log ALL events to debug
+          console.log('📡 Real-time slot event received (ALL):', {
+            eventType: payload.eventType,
+            table: payload.table,
+            schema: payload.schema,
+            new: payload.new,
+            old: payload.old,
+            username,
+            ourUserId: userIdRef.current
+          })
+          
           // Only process if it matches our user's slots
           const changedSlot = payload.new || payload.old
+          
+          if (!changedSlot) {
+            console.log('⚠️ Event has no new or old data, skipping')
+            return
+          }
           
           console.log('Real-time slot event received:', {
             eventType: payload.eventType,
@@ -145,18 +176,56 @@ export function useSupabaseSlotsByUsername(username: string | null) {
             return
           }
           
-          if (changedSlot && changedSlot.userId === userIdRef.current) {
+          // For DELETE events, process if we have slots locally (userId might not be in payload.old)
+          // For INSERT/UPDATE events, check if it matches our user's slots
+          const isDeleteEvent = payload.eventType === 'DELETE' && payload.old
+          const hasSlotsLocally = slotsCountRef.current > 0
+          const matchesOurUser = changedSlot && changedSlot.userId === userIdRef.current
+          
+          // Process DELETE events if we have slots locally (even if userId is missing from payload.old)
+          // Process INSERT/UPDATE events if they match our user
+          if ((isDeleteEvent && hasSlotsLocally) || (matchesOurUser && !isDeleteEvent)) {
             console.log('Slot change matches our user - processing:', payload.eventType, {
-              slotId: changedSlot.id,
-              slotName: changedSlot.name,
+              slotId: changedSlot?.id,
+              slotName: changedSlot?.name,
               win: payload.new?.win ?? payload.old?.win,
               prevWin: payload.old?.win,
-              newWin: payload.new?.win
+              newWin: payload.new?.win,
+              isDeleteEvent,
+              hasSlotsLocally,
+              matchesOurUser
             })
             
             // Update state directly for immediate feedback
             if (payload.eventType === 'INSERT' && payload.new) {
               const newSlot = payload.new as Slot
+              
+              // AGGRESSIVE WORKAROUND: If we have slots locally and receive an INSERT event,
+              // it likely means slots were deleted and recreated (deleteAll + createBatch pattern).
+              // Reload immediately to sync with database, don't wait for duplicate detection.
+              if (slotsCountRef.current > 0 && loadSlotsRef.current) {
+                console.log('🔄 Received INSERT event while we have slots locally - likely after delete+recreate, scheduling reload', {
+                  newSlotName: newSlot.name,
+                  newSlotId: newSlot.id,
+                  currentSlotsCount: slotsCountRef.current,
+                  username
+                })
+                // Clear any existing reload timer
+                if (insertReloadTimerRef.current) {
+                  clearTimeout(insertReloadTimerRef.current)
+                }
+                // Debounce reload to handle multiple INSERT events (when recreating multiple slots)
+                // But make it fast (100ms) so it feels immediate
+                insertReloadTimerRef.current = setTimeout(() => {
+                  if (loadSlotsRef.current) {
+                    console.log('🔄 Executing reload after INSERT event(s)')
+                    loadSlotsRef.current()
+                  }
+                  insertReloadTimerRef.current = null
+                }, 100)
+                return // Skip adding to state, reload will update it
+              }
+              
               setSlots((prev) => {
                 // Check for duplicates by ID and name
                 const hasDuplicateId = prev.some((s) => s.id === newSlot.id)
@@ -169,21 +238,82 @@ export function useSupabaseSlotsByUsername(username: string | null) {
                   return prev // Don't add duplicate
                 }
                 
-                return [...prev, newSlot]
+                const updated = [...prev, newSlot]
+                slotsCountRef.current = updated.length
+                return updated
               })
             } else if (payload.eventType === 'UPDATE' && payload.new) {
               // Update slot - this handles both win being added AND win being deleted (set to null)
               const updatedSlot = payload.new as Slot
               setSlots((prev) => {
-                const updated = prev.map((slot) => (slot.id === updatedSlot.id ? updatedSlot : slot))
-                console.log('Slot updated via real-time:', updatedSlot.name, 'Win changed from', payload.old?.win, 'to', updatedSlot.win)
-                console.log('Updated slots array length:', updated.length, 'Next slot with null win:', updated.find(s => s.win === null || s.win === undefined)?.name)
-                return updated
+                const existingIndex = prev.findIndex((slot) => slot.id === updatedSlot.id)
+                if (existingIndex >= 0) {
+                  // Slot exists, update it
+                  const updated = prev.map((slot) => (slot.id === updatedSlot.id ? updatedSlot : slot))
+                  slotsCountRef.current = updated.length
+                  console.log('Slot updated via real-time:', updatedSlot.name, 'Win changed from', payload.old?.win, 'to', updatedSlot.win)
+                  return updated
+                } else {
+                  // Slot doesn't exist in our list yet - reload to get all slots
+                  console.log('Slot updated but not in current list, reloading to get latest data:', updatedSlot.name)
+                  debouncedReload()
+                  return prev // Return current state while reloading
+                }
               })
             } else if (payload.eventType === 'DELETE' && payload.old) {
-              setSlots((prev) => prev.filter((slot) => slot.id !== payload.old.id))
+              // Track DELETE events - if we get multiple in quick succession, it's likely a bulk delete
+              deleteEventCountRef.current += 1
+              
+              const previousCount = slotsCountRef.current
+              
+              console.log('🗑️ DELETE event received:', {
+                slotId: payload.old.id,
+                slotName: payload.old.name,
+                deleteCount: deleteEventCountRef.current,
+                previousSlotsCount: previousCount,
+                username
+              })
+              
+              // Remove the deleted slot from state first
+              setSlots((prev) => {
+                const filtered = prev.filter((slot) => slot.id !== payload.old.id)
+                slotsCountRef.current = filtered.length // Update ref
+                return filtered
+              })
+              
+              // Clear any existing delete timer
+              if (deleteEventTimerRef.current) {
+                clearTimeout(deleteEventTimerRef.current)
+              }
+              
+              // Clear any existing debounce timer
+              if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current)
+              }
+              
+              // AGGRESSIVE: Reload on ANY DELETE if we had more than 1 slot (likely bulk delete)
+              // Also reload immediately if list becomes empty
+              if (previousCount > 1 || slotsCountRef.current === 0) {
+                // Reload immediately - don't wait, bulk deletes might send all events at once
+                console.log('🔄 Reloading immediately after DELETE - deleteCount:', deleteEventCountRef.current, 'previousCount:', previousCount, 'remainingSlots:', slotsCountRef.current, 'username:', username)
+                deleteEventCountRef.current = 0
+                if (loadSlotsRef.current) {
+                  // Use a tiny delay (50ms) to ensure state update completes first
+                  setTimeout(() => {
+                    if (loadSlotsRef.current) {
+                      loadSlotsRef.current()
+                    }
+                  }, 50)
+                }
+              } else {
+                // For single slot deletes, reset counter after 1 second
+                deleteEventTimerRef.current = setTimeout(() => {
+                  deleteEventCountRef.current = 0
+                }, 1000)
+              }
             } else {
               // For batch operations or uncertainty, reload after debounce
+              console.log('Unknown event type or batch operation, reloading:', payload.eventType)
               debouncedReload()
             }
           } else {
@@ -193,11 +323,32 @@ export function useSupabaseSlotsByUsername(username: string | null) {
               username
             })
           }
+          
+          // WORKAROUND: If we have slots locally but receive an INSERT event for a slot we don't have,
+          // it might mean all slots were cleared and new ones are being added
+          // This helps catch bulk deletes that don't fire DELETE events
+          if (payload.eventType === 'INSERT' && payload.new && slotsCountRef.current === 0) {
+            console.log('🔍 Detected INSERT event but local slots are empty - might be after bulk delete, reloading')
+            if (loadSlotsRef.current) {
+              setTimeout(() => {
+                if (loadSlotsRef.current) {
+                  loadSlotsRef.current()
+                }
+              }, 100)
+            }
+          }
         }
       )
       .subscribe((status) => {
+        console.log('Supabase subscription status for slots:', status, 'username:', username)
         if (status === 'SUBSCRIBED') {
-          console.log('Successfully subscribed to slots updates for', username)
+          console.log('✅ Successfully subscribed to slots updates for', username)
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Channel error subscribing to slots updates for', username)
+        } else if (status === 'TIMED_OUT') {
+          console.error('❌ Subscription timed out for slots updates for', username)
+        } else if (status === 'CLOSED') {
+          console.warn('⚠️ Subscription closed for slots updates for', username)
         }
       })
 
@@ -205,6 +356,12 @@ export function useSupabaseSlotsByUsername(username: string | null) {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
+      }
+      if (deleteEventTimerRef.current) {
+        clearTimeout(deleteEventTimerRef.current)
+      }
+      if (insertReloadTimerRef.current) {
+        clearTimeout(insertReloadTimerRef.current)
       }
       if (channel) {
         supabase.removeChannel(channel)

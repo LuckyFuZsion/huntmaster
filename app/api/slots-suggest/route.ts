@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+// Set max duration to prevent expensive external API calls from running too long
+export const maxDuration = 20 // 20 seconds max
+
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
