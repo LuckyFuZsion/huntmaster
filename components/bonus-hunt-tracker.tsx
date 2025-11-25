@@ -1837,6 +1837,9 @@ ${slotListInfo}`
               </div>
             )}
             <div className="flex flex-col space-y-2">
+              <Link href="/account">
+                <Button className="w-full">My Account</Button>
+              </Link>
               <Link href="/spider-edit">
                 <Button className="w-full">Customisable Overlay</Button>
               </Link>

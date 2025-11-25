@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 
 // Simple in-memory cache with TTL
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 5000 // 5 seconds
+const CACHE_TTL = 30000 // 30 seconds (increased from 5s to reduce database queries)
 
 function getCached(key: string) {
   const cached = cache.get(key)

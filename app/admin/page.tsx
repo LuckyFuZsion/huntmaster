@@ -10,7 +10,8 @@ import {
   Users, 
   Shield, 
   ArrowLeft,
-  Database
+  Database,
+  BarChart3
 } from "lucide-react"
 
 export default function AdminDashboard() {
@@ -65,7 +66,7 @@ export default function AdminDashboard() {
           </AlertDescription>
         </Alert>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl">
           {/* User Management */}
           <Card className="bg-gradient-to-br from-blue-950 to-blue-900 border-blue-800 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push("/admin/users")}>
             <CardHeader>
@@ -96,6 +97,23 @@ export default function AdminDashboard() {
             <CardContent>
               <p className="text-gray-300 text-sm">
                 View and manage users stored in environment variables.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* API Usage Dashboard */}
+          <Card className="bg-gradient-to-br from-emerald-950 to-emerald-900 border-emerald-800 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push("/admin/api-usage")}>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-white flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5" />
+                  API Usage
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-300 text-sm">
+                Review per-user search consumption, adjust limits, and reset monthly usage.
               </p>
             </CardContent>
           </Card>

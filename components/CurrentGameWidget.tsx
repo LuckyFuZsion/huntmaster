@@ -69,8 +69,8 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
     p.set("q", effectiveTitle);
     if (effectiveProvider) p.set("provider", effectiveProvider);
     p.set("limit", "30"); // Increased limit for better chance of finding matches
-    // exhaustive=1 ensures full-table search on SlotsLaunch side
-    p.set("exhaustive", "1");
+    // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls per search)
+    // First page results are sufficient for widget display
     return `/api/slots-suggest?${p.toString()}`;
   }, [effectiveTitle, effectiveProvider]);
 
@@ -174,7 +174,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
                 fallbackParams.set('q', titleWithoutDash);
                 if (effectiveProvider) fallbackParams.set('provider', effectiveProvider);
                 fallbackParams.set('limit', '30');
-                fallbackParams.set('exhaustive', '1');
+                // REMOVED: exhaustive=1 - too expensive
                 
                 const fallbackRes = await fetch(`/api/slots-suggest?${fallbackParams.toString()}`, { cache: 'no-store' });
                 const fallbackData = await fallbackRes.json();

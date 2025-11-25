@@ -115,6 +115,7 @@ export function useSupabaseSlotsByUsername(username: string | null) {
     loadSlots()
 
     // Debounced reload function to prevent rapid-fire requests
+    // OPTIMIZATION: Increased debounce to 2 seconds to reduce API calls and function duration costs
     const debouncedReload = () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
@@ -124,7 +125,7 @@ export function useSupabaseSlotsByUsername(username: string | null) {
         if (loadSlotsRef.current) {
           loadSlotsRef.current()
         }
-      }, 500) // Wait 500ms after last change before reloading
+      }, 2000) // Wait 2 seconds after last change before reloading (increased from 500ms)
     }
 
     // Subscribe to real-time changes for slots table
@@ -215,14 +216,14 @@ export function useSupabaseSlotsByUsername(username: string | null) {
                   clearTimeout(insertReloadTimerRef.current)
                 }
                 // Debounce reload to handle multiple INSERT events (when recreating multiple slots)
-                // But make it fast (100ms) so it feels immediate
+                // OPTIMIZATION: Increased to 1 second to reduce API calls
                 insertReloadTimerRef.current = setTimeout(() => {
                   if (loadSlotsRef.current) {
                     console.log('🔄 Executing reload after INSERT event(s)')
                     loadSlotsRef.current()
                   }
                   insertReloadTimerRef.current = null
-                }, 100)
+                }, 1000) // Increased from 100ms to 1s to reduce function duration costs
                 return // Skip adding to state, reload will update it
               }
               
@@ -298,12 +299,12 @@ export function useSupabaseSlotsByUsername(username: string | null) {
                 console.log('🔄 Reloading immediately after DELETE - deleteCount:', deleteEventCountRef.current, 'previousCount:', previousCount, 'remainingSlots:', slotsCountRef.current, 'username:', username)
                 deleteEventCountRef.current = 0
                 if (loadSlotsRef.current) {
-                  // Use a tiny delay (50ms) to ensure state update completes first
+                  // OPTIMIZATION: Increased delay to 500ms to batch multiple DELETE events and reduce API calls
                   setTimeout(() => {
                     if (loadSlotsRef.current) {
                       loadSlotsRef.current()
                     }
-                  }, 50)
+                  }, 500) // Increased from 50ms to 500ms to reduce function duration costs
                 }
               } else {
                 // For single slot deletes, reset counter after 1 second

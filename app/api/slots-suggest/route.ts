@@ -1,7 +1,49 @@
 import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { decrypt } from "@/lib/protection";
 
 // Set max duration to prevent expensive external API calls from running too long
 export const maxDuration = 20 // 20 seconds max
+
+// Simple in-memory cache with TTL to reduce expensive external API calls
+const cache = new Map<string, { data: any; timestamp: number }>()
+const CACHE_TTL = 86400000 // 24 hours (86400 seconds) - game data rarely changes
+
+// API call tracking for monitoring
+let apiCallCount = 0
+let cacheHitCount = 0
+let slotStreamersCallCount = 0
+let slotsLaunchCallCount = 0
+
+function getCached(key: string) {
+  const cached = cache.get(key)
+  if (!cached) return null
+  
+  const age = Date.now() - cached.timestamp
+  if (age > CACHE_TTL) {
+    cache.delete(key)
+    return null
+  }
+  
+  cacheHitCount++
+  return cached.data
+}
+
+function setCache(key: string, data: any) {
+  cache.set(key, { data, timestamp: Date.now() })
+}
+
+// Export stats for monitoring
+export function getApiStats() {
+  return {
+    totalApiCalls: apiCallCount,
+    cacheHits: cacheHitCount,
+    cacheHitRate: apiCallCount > 0 ? ((cacheHitCount / (apiCallCount + cacheHitCount)) * 100).toFixed(2) + '%' : '0%',
+    slotStreamersCalls: slotStreamersCallCount,
+    slotsLaunchCalls: slotsLaunchCallCount,
+    cacheSize: cache.size
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -10,17 +52,59 @@ export async function GET(request: Request) {
     const limit = Number(searchParams.get("limit") || 10);
     const page = searchParams.get("page") || undefined;
     const exhaustive = searchParams.get("exhaustive") === "1" || searchParams.get("exhaustive") === "true";
+    
+    // Get userId from session if provided (optional for backward compatibility)
+    let userId: string | null = null;
+    try {
+      const sessionParam = searchParams.get("session");
+      if (sessionParam) {
+        const sessionData = JSON.parse(decrypt(sessionParam));
+        userId = sessionData.userId || null;
+      }
+    } catch (e) {
+      // Session not provided or invalid - continue without user tracking
+    }
 
     if (!q || q.trim().length < 2) {
       return NextResponse.json({ success: true, data: [], total: 0, limit });
     }
+
+    // Check cache first - cache key includes query, limit, and exhaustive flag
+    const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
+    const cached = getCached(cacheKey)
+    if (cached) {
+      console.log(`✅ Cache hit for slots-suggest: "${q}" (Cache stats: ${getApiStats().cacheHits} hits, ${getApiStats().totalApiCalls} calls)`)
+      return NextResponse.json(cached)
+    }
+
+    // Check user's API usage limit (only if userId is provided)
+    if (userId) {
+      const usageCheck = await supabaseAdmin.apiUsage.checkLimit(userId);
+      if (!usageCheck.canMakeRequest) {
+        console.log(`🚫 API limit exceeded for user ${userId}: ${usageCheck.monthlySearches}/${usageCheck.monthlyLimit} searches used`)
+        return NextResponse.json({
+          success: false,
+          error: "Monthly API limit exceeded",
+          limitExceeded: true,
+          monthlySearches: usageCheck.monthlySearches,
+          monthlyLimit: usageCheck.monthlyLimit,
+          remaining: usageCheck.remaining,
+          message: `You've reached your monthly limit of ${usageCheck.monthlyLimit} searches. Please upgrade your plan or wait for the next billing cycle.`
+        }, { status: 429 });
+      }
+    }
+
+    // Track API call
+    apiCallCount++
+    console.log(`📊 API Call #${apiCallCount} for slots-suggest: "${q}" (Cache: ${cacheHitCount} hits, ${cache.size} entries, User: ${userId || 'anonymous'})`)
 
     // PRIMARY: Try Slot Streamers API first
     const suggestSSUrl = new URL(`/api/slot-streamers/suggest-games`, origin);
     suggestSSUrl.searchParams.set("q", q);
     suggestSSUrl.searchParams.set("limit", String(limit));
 
-    console.log(`🔍 Searching Slot Streamers API for: "${q}"`);
+    slotStreamersCallCount++
+    console.log(`🔍 Searching Slot Streamers API for: "${q}" (Call #${slotStreamersCallCount})`);
     const ssRes = await fetch(suggestSSUrl.toString(), { cache: "no-store" });
 
     // Check for rate limiting (429) and log warnings
@@ -47,6 +131,8 @@ export async function GET(request: Request) {
     }
 
     // FALLBACK: Only use SlotsLaunch if Slot Streamers has no results or is rate limited
+    // OPTIMIZATION: Never use exhaustive mode - it's too expensive (fetches all pages = 10-20+ API calls)
+    // Only fetch first page of results to keep costs low
     let slJson: any = { games: [] };
     let slGames: any[] = [];
     let slRateLimited = false;
@@ -58,9 +144,11 @@ export async function GET(request: Request) {
       slotsLaunchUrl.searchParams.set("search", q);
       slotsLaunchUrl.searchParams.set("limit", String(limit));
       if (page) slotsLaunchUrl.searchParams.set("page", page);
-      if (exhaustive) slotsLaunchUrl.searchParams.set("exhaustive", "1");
+      // REMOVED: exhaustive mode - too expensive, fetches all pages (10-20+ API calls)
+      // Only fetch first page to keep costs low
 
-      console.log(`🔄 Falling back to SlotsLaunch API for: "${q}"`);
+      slotsLaunchCallCount++
+      console.log(`🔄 Falling back to SlotsLaunch API for: "${q}" (Call #${slotsLaunchCallCount}, first page only to reduce costs)`);
       const slRes = await fetch(slotsLaunchUrl.toString(), { cache: "no-store" });
       
       slRateLimited = slRes.status === 429;
@@ -206,13 +294,38 @@ export async function GET(request: Request) {
       slotsLaunchResults: slGames.length,
     };
     
-    return NextResponse.json({ 
+    const response = { 
       success: true, 
       data: payload, 
       pagination,
       metadata,
       ...(warnings.length > 0 && { warnings, rateLimited: true })
-    });
+    }
+    
+    // Cache the response
+    setCache(cacheKey, response)
+    
+    // Increment user's API usage count (only if userId provided and API call was made)
+    if (userId) {
+      try {
+        const usage = await supabaseAdmin.apiUsage.increment(userId);
+        console.log(`📈 API usage updated for user ${userId}: ${usage.monthlySearches}/${usage.monthlyLimit || 'unlimited'} (${usage.remaining || 'unlimited'} remaining)`)
+        // Add usage info to response
+        response.metadata = {
+          ...response.metadata,
+          apiUsage: {
+            monthlySearches: usage.monthlySearches,
+            monthlyLimit: usage.monthlyLimit,
+            remaining: usage.remaining
+          }
+        }
+      } catch (error) {
+        console.error('Error incrementing API usage (non-blocking):', error)
+        // Don't fail the request if usage tracking fails
+      }
+    }
+    
+    return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : String(error) },

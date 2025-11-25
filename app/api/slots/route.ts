@@ -7,7 +7,7 @@ export const maxDuration = 30 // 30 seconds max
 
 // Simple in-memory cache with TTL
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 5000 // 5 seconds
+const CACHE_TTL = 30000 // 30 seconds (increased from 5s to reduce database queries)
 
 function getCached(key: string) {
   const cached = cache.get(key)
@@ -110,37 +110,16 @@ export async function POST(request: Request) {
         const newWin = typeof singleSlot.win === "number" ? singleSlot.win : null
         console.log("Win recording check - prevWin:", prevWin, "newWin:", newWin, "userId:", userId)
         
-        // Always record when there's a win amount (even if unchanged) to track all wins
+        // Record win whenever a valid win amount is saved (non-blocking to reduce function duration)
+        // OPTIMIZATION: Skip expensive game verification - just record the win
+        // Game verification was causing 5-20 second function durations per win entry
         if (newWin !== null && newWin >= 0) {
           const bet = Number(singleSlot.bet) || 0
           const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
-          console.log("Attempting to record win - gameTitle:", singleSlot.name, "bet:", bet, "winAmount:", newWin, "xWin:", xWin)
-          
-          // Verify game exists in database before saving
           const gameTitleTrimmed = String(singleSlot.name).trim()
-          let gameExists = false
-          try {
-            const origin = request.url.startsWith("http") ? new URL(request.url).origin : "http://localhost:3000"
-            const searchUrl = new URL("/api/slots-suggest", origin)
-            searchUrl.searchParams.set("q", gameTitleTrimmed)
-            searchUrl.searchParams.set("limit", "10")
-            searchUrl.searchParams.set("exhaustive", "1")
-            
-            const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" })
-            const searchData = await searchRes.json()
-            if (searchData.success && Array.isArray(searchData.data)) {
-              const titleLower = gameTitleTrimmed.toLowerCase()
-              gameExists = searchData.data.some((it: any) => 
-                it.title?.toLowerCase().trim() === titleLower
-              )
-            }
-          } catch (e: any) {
-            console.error("Error verifying game existence:", e)
-          }
           
-          if (!gameExists) {
-            console.log("⚠️ Skipping win record - game not found in database:", gameTitleTrimmed)
-          } else {
+          // Create win record in background (non-blocking) to reduce function duration
+          Promise.resolve().then(async () => {
             try {
               const winRecord: any = {
                 userId,
@@ -149,8 +128,6 @@ export async function POST(request: Request) {
                 winAmount: Number(newWin),
                 xWin,
               }
-              // Only include optional fields if they have values (Firestore doesn't allow undefined)
-              // gameSlug and provider can be added later if needed
               console.log("Creating userWin with data:", JSON.stringify(winRecord))
               const created = await supabaseAdmin.userWins.create(winRecord)
               console.log("✅ Successfully recorded user win. ID:", created.id, "Game:", singleSlot.name, "Win:", newWin, "X:", xWin)
@@ -165,7 +142,10 @@ export async function POST(request: Request) {
                 winAmount: newWin
               })
             }
-          }
+          }).catch(err => {
+            console.error("Error in background win creation:", err)
+          })
+          // Don't await - let it run in background to reduce function duration
         } else {
           console.log("Skipping win record - no valid win amount. newWin:", newWin)
         }
@@ -185,37 +165,16 @@ export async function POST(request: Request) {
             createdAt: new Date(),
           })
           
-          // Record win if creating a new slot with a win
+          // Record win if creating a new slot with a win (non-blocking to reduce function duration)
+          // OPTIMIZATION: Skip expensive game verification - just record the win
           const newWin = typeof singleSlot.win === "number" ? singleSlot.win : null
           if (newWin !== null && newWin >= 0) {
             const bet = Number(singleSlot.bet) || 0
             const xWin = bet > 0 ? Number((newWin / bet).toFixed(2)) : 0
-            
-            // Verify game exists in database before saving
             const gameTitleTrimmed = String(singleSlot.name).trim()
-            let gameExists = false
-            try {
-              const origin = request.url.startsWith("http") ? new URL(request.url).origin : "http://localhost:3000"
-              const searchUrl = new URL("/api/slots-suggest", origin)
-              searchUrl.searchParams.set("q", gameTitleTrimmed)
-              searchUrl.searchParams.set("limit", "10")
-              searchUrl.searchParams.set("exhaustive", "1")
-              
-              const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" })
-              const searchData = await searchRes.json()
-              if (searchData.success && Array.isArray(searchData.data)) {
-                const titleLower = gameTitleTrimmed.toLowerCase()
-                gameExists = searchData.data.some((it: any) => 
-                  it.title?.toLowerCase().trim() === titleLower
-                )
-              }
-            } catch (e: any) {
-              console.error("Error verifying game existence:", e)
-            }
             
-            if (!gameExists) {
-              console.log("⚠️ Skipping win record for new slot - game not found in database:", gameTitleTrimmed)
-            } else {
+            // Create win record in background (non-blocking) to reduce function duration
+            Promise.resolve().then(async () => {
               try {
                 await supabaseAdmin.userWins.create({
                   userId,
@@ -228,7 +187,10 @@ export async function POST(request: Request) {
               } catch (e) {
                 console.error("Failed to record user win for new slot:", e)
               }
-            }
+            }).catch(err => {
+              console.error("Error in background win creation for new slot:", err)
+            })
+            // Don't await - let it run in background to reduce function duration
           }
           
           return NextResponse.json({ success: true, slot: { ...newSlot, id: newSlot.id } })

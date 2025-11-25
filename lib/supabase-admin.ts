@@ -51,6 +51,7 @@ function normalizeUser(user: any): User {
     huntmaster: user.huntmaster ?? false, // Default to false for safety
     huntmasterAdmin: user.huntmasterAdmin ?? user.huntmaster_admin ?? false,
     createdAt: user.createdAt ?? user.created_at ?? new Date(),
+    apiMonthlyLimit: user.apiMonthlyLimit ?? user.api_monthly_limit ?? null,
   }
 }
 
@@ -66,6 +67,7 @@ export interface User {
   huntmaster?: boolean // Access flag for HuntMaster application
   huntmasterAdmin?: boolean // Admin flag for HuntMaster (separate from main app admin)
   createdAt: Date | string
+  apiMonthlyLimit?: number | null
 }
 
 export interface Slot {
@@ -134,6 +136,22 @@ export interface CurrentGame {
   gameTitle: string
   provider?: string
   updatedAt: Date | string
+}
+
+export interface UserApiUsageRecord {
+  id: string
+  userId: string
+  monthlySearches: number
+  monthlyLimit: number | null
+  currentMonth: string
+  updatedAt?: string | null
+  lastResetAt?: string | null
+}
+
+function getCurrentMonthKey(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
 }
 
 // Supabase database operations (mirroring firestoreAdmin interface)
@@ -223,6 +241,7 @@ export const supabaseAdmin = {
         email: userData.email,
         discordId: userData.discordId,
         createdAt: new Date().toISOString(),
+        apiMonthlyLimit: userData.apiMonthlyLimit ?? null,
       }
       
       // Try camelCase first
@@ -254,6 +273,7 @@ export const supabaseAdmin = {
             huntmaster: userData.huntmaster ?? false,
             huntmaster_admin: userData.huntmasterAdmin ?? false,
             created_at: new Date().toISOString(),
+            api_monthly_limit: userData.apiMonthlyLimit ?? null,
           }
           
           const { data: snakeData, error: snakeError } = await getSupabaseAdminClient()
@@ -290,6 +310,7 @@ export const supabaseAdmin = {
         if (updateData.email !== undefined) snakeCaseData.email = updateData.email
         if (updateData.password !== undefined) snakeCaseData.password = updateData.password
         if (updateData.username !== undefined) snakeCaseData.username = updateData.username
+        if (updateData.apiMonthlyLimit !== undefined) snakeCaseData.api_monthly_limit = updateData.apiMonthlyLimit
         
         const { error: snakeError } = await getSupabaseAdminClient()
           .from('users')
@@ -651,6 +672,154 @@ export const supabaseAdmin = {
     
     async clear(userId: string): Promise<void> {
       await this.delete(userId)
+    },
+  },
+
+  // API Usage tracking and capping
+  apiUsage: {
+    /**
+     * Check if user can make an API request (hasn't exceeded monthly limit)
+     * Returns: { canMakeRequest: boolean, monthlySearches: number, monthlyLimit: number, remaining: number }
+     */
+    async checkLimit(userId: string | null): Promise<{ canMakeRequest: boolean; monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      if (!userId) {
+        // No user = unlimited (for backward compatibility)
+        return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+
+      try {
+        const { data, error } = await getSupabaseAdminClient()
+          .rpc('get_user_api_usage', { p_user_id: userId })
+
+        if (error) {
+          console.error('Error checking API usage limit:', error)
+          // On error, allow request (fail open for reliability)
+          return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        if (!data || data.length === 0) {
+          // No record = unlimited or first time
+          return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        const usage = data[0]
+        return {
+          canMakeRequest: usage.can_make_request ?? true,
+          monthlySearches: usage.monthly_searches ?? 0,
+          monthlyLimit: usage.monthly_limit,
+          remaining: usage.monthly_limit ? Math.max(0, usage.monthly_limit - (usage.monthly_searches ?? 0)) : null
+        }
+      } catch (error) {
+        console.error('Error checking API usage limit:', error)
+        // Fail open - allow request on error
+        return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+    },
+
+    /**
+     * Increment API usage count for a user
+     * Returns: { monthlySearches: number, monthlyLimit: number, remaining: number }
+     */
+    async increment(userId: string | null): Promise<{ monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      if (!userId) {
+        // No user = don't track
+        return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+
+      try {
+        const { data, error } = await getSupabaseAdminClient()
+          .rpc('increment_api_usage', { p_user_id: userId })
+
+        if (error) {
+          console.error('Error incrementing API usage:', error)
+          return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        if (!data || data.length === 0) {
+          return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        const usage = data[0]
+        return {
+          monthlySearches: usage.monthly_searches ?? 0,
+          monthlyLimit: usage.monthly_limit,
+          remaining: usage.remaining ?? null
+        }
+      } catch (error) {
+        console.error('Error incrementing API usage:', error)
+        return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+    },
+
+    /**
+     * Set monthly limit for a user (for tier-based pricing)
+     */
+    async setLimit(userId: string, limit: number | null): Promise<void> {
+      try {
+        const client = getSupabaseAdminClient()
+        const { error } = await client
+          .from('users')
+          .update({ apiMonthlyLimit: limit })
+          .eq('id', userId)
+        
+        if (error) {
+          console.error('Error setting API limit:', error)
+          throw error
+        }
+
+        // Keep usage rows in sync with the new limit
+        await client
+          .from('user_api_usage')
+          .update({ monthlyLimit: limit })
+          .eq('userId', userId)
+          .eq('currentMonth', getCurrentMonthKey())
+      } catch (error) {
+        console.error('Error setting API limit:', error)
+        throw error
+      }
+    },
+
+    /**
+     * Get current usage for a user
+     */
+    async getUsage(userId: string): Promise<{ monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      return this.checkLimit(userId)
+    },
+
+    async listCurrentUsage(month?: string): Promise<UserApiUsageRecord[]> {
+      const targetMonth = month || getCurrentMonthKey()
+      const { data, error } = await getSupabaseAdminClient()
+        .from('user_api_usage')
+        .select('*')
+        .eq('currentMonth', targetMonth)
+
+      if (error) {
+        console.error('Error listing API usage:', error)
+        throw error
+      }
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        userId: row.userId ?? row.user_id,
+        monthlySearches: row.monthlySearches ?? row.monthly_searches ?? 0,
+        monthlyLimit: row.monthlyLimit ?? row.monthly_limit ?? null,
+        currentMonth: row.currentMonth ?? row.current_month ?? targetMonth,
+        updatedAt: row.updatedAt ?? row.updated_at ?? null,
+        lastResetAt: row.lastResetAt ?? row.last_reset_at ?? null,
+      }))
+    },
+
+    async resetUserUsage(userId: string, month?: string): Promise<void> {
+      const targetMonth = month || getCurrentMonthKey()
+      const { error } = await getSupabaseAdminClient()
+        .from('user_api_usage')
+        .delete()
+        .match({ userId, currentMonth: targetMonth })
+
+      if (error) {
+        console.error('Error resetting API usage:', error)
+        throw error
+      }
     },
   },
 }

@@ -29,7 +29,7 @@ async function checkGameExists(gameTitle, apiBaseUrl) {
     const searchUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
     searchUrl.searchParams.set('q', gameTitle.trim());
     searchUrl.searchParams.set('limit', '20'); // Increase limit to get more results
-    searchUrl.searchParams.set('exhaustive', '1');
+    // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
     
     const response = await fetch(searchUrl.toString(), { cache: 'no-store' });
     const data = await response.json();
@@ -61,7 +61,7 @@ async function checkGameExists(gameTitle, apiBaseUrl) {
           const fallbackUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
           fallbackUrl.searchParams.set('q', titleWithoutDash);
           fallbackUrl.searchParams.set('limit', '20');
-          fallbackUrl.searchParams.set('exhaustive', '1');
+          // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
           
           try {
             const fallbackResponse = await fetch(fallbackUrl.toString(), { cache: 'no-store' });
