@@ -35,6 +35,45 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
     return `/api/slots-suggest?${p.toString()}`;
   }, [value, minChars]);
 
+  // OPTIMIZATION: Show user's previously used games as suggestions (no API call)
+  const [userSlots, setUserSlots] = useState<Suggestion[]>([]);
+  
+  useEffect(() => {
+    // Load user's slots for quick suggestions (one-time load, no API cost)
+    const loadUserSlots = async () => {
+      try {
+        const session = localStorage.getItem("huntmaster_session");
+        if (!session) return;
+        
+        const res = await fetch("/api/slots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session, action: "get" }),
+        });
+        const data = await res.json();
+        
+        if (data.success && Array.isArray(data.slots)) {
+          // Convert slots to suggestions format
+          const suggestions: Suggestion[] = data.slots
+            .map((slot: any, idx: number) => ({
+              id: idx,
+              slug: slot.name.toLowerCase().replace(/\s+/g, "-"),
+              title: slot.name,
+              provider: undefined,
+            }))
+            .slice(0, 50); // Limit to 50 most recent
+          
+          setUserSlots(suggestions);
+        }
+      } catch (error) {
+        // Silently fail - this is just for convenience
+        console.log("Could not load user slots for suggestions:", error);
+      }
+    };
+    
+    loadUserSlots();
+  }, []);
+
   // COST OPTIMIZATION: Autocomplete is now completely optional - no API calls by default
   // Users can type freely without triggering expensive API calls
   // Only search when explicitly requested (Enter or search button)
@@ -46,6 +85,18 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
     }
 
     const query = value.trim().toLowerCase();
+    
+    // OPTIMIZATION: Show matching games from user's previous slots (no API call)
+    const matchingUserSlots = userSlots.filter((slot) =>
+      slot.title.toLowerCase().includes(query)
+    );
+    
+    if (matchingUserSlots.length > 0) {
+      setItems(matchingUserSlots);
+      setOpen(true);
+      setHighlight(0);
+      return;
+    }
     
     // Check client-side cache first for instant results
     const cached = searchCacheRef.current.get(query);
@@ -61,7 +112,7 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
     // This prevents accidental API calls while typing
     setItems([]);
     setOpen(false);
-  }, [value, minChars]);
+  }, [value, minChars, userSlots]);
 
   // Function to perform actual API search (called on Enter or search button)
   const performSearch = useCallback(async () => {
@@ -92,6 +143,41 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
     try {
       // Get session for usage tracking
       const session = localStorage.getItem("huntmaster_session");
+      
+      // OPTIMIZATION: Check database first (cheap, no external API)
+      // This avoids expensive external API calls for games already in database
+      if (session) {
+        try {
+          const checkUrl = `/api/games/check-exists?gameTitle=${encodeURIComponent(value.trim())}&session=${encodeURIComponent(session)}`;
+          const checkRes = await fetch(checkUrl, { cache: "no-store" });
+          const checkData = await checkRes.json();
+          
+          if (checkData.success && checkData.exists && checkData.source !== "error") {
+            // Game exists in database - create suggestion from it (no external API call needed)
+            const suggestion: Suggestion = {
+              id: Date.now(), // Temporary ID
+              slug: value.trim().toLowerCase().replace(/\s+/g, "-"),
+              title: value.trim(),
+              provider: undefined,
+            };
+            
+            const suggestions = [suggestion];
+            searchCacheRef.current.set(query, suggestions);
+            setItems(suggestions);
+            setOpen(true);
+            setHighlight(0);
+            lastSearchedRef.current = query;
+            setLoading(false);
+            console.log("✓ Game found in database, skipping external API call");
+            return; // Skip external API call
+          }
+        } catch (checkError) {
+          // If database check fails, continue to external API
+          console.log("Database check failed, using external API:", checkError);
+        }
+      }
+      
+      // Fallback to external API if not found in database
       const urlWithSession = session 
         ? `${queryUrl}&session=${encodeURIComponent(session)}`
         : queryUrl;

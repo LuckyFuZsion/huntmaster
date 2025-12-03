@@ -4,6 +4,7 @@ export const maxDuration = 30 // 30 seconds max
 // Simple in-memory cache with TTL to reduce expensive external API calls
 const cache = new Map<string, { data: any; timestamp: number }>()
 const CACHE_TTL = 86400000 // 24 hours (86400 seconds) - game data rarely changes
+const MAX_CACHE_SIZE = 1000 // Limit cache to 1000 entries to prevent memory issues
 
 function getCached(key: string) {
   const cached = cache.get(key)
@@ -19,6 +20,24 @@ function getCached(key: string) {
 }
 
 function setCache(key: string, data: any) {
+  // If cache is full, remove oldest entries (LRU-like behavior)
+  if (cache.size >= MAX_CACHE_SIZE) {
+    // Find and remove oldest entry
+    let oldestKey: string | null = null
+    let oldestTime = Date.now()
+    
+    for (const [k, v] of cache.entries()) {
+      if (v.timestamp < oldestTime) {
+        oldestTime = v.timestamp
+        oldestKey = k
+      }
+    }
+    
+    if (oldestKey) {
+      cache.delete(oldestKey)
+    }
+  }
+  
   cache.set(key, { data, timestamp: Date.now() })
 }
 

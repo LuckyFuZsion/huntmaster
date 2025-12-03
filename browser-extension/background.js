@@ -16,15 +16,65 @@ function normalizeGameTitle(title) {
     .trim();
 }
 
+// Cache for validated games (stored in extension storage for persistence)
+const VALIDATION_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 // Function to check if a game exists in the database
-async function checkGameExists(gameTitle, apiBaseUrl) {
+async function checkGameExists(gameTitle, apiBaseUrl, sessionToken) {
   try {
     const normalizedTitle = normalizeGameTitle(gameTitle);
+    const cacheKey = `validated_game:${normalizedTitle}`;
+    
     console.log('[HuntMaster Extension] Checking game existence:', {
       original: gameTitle.trim(),
       normalized: normalizedTitle
     });
     
+    // Step 1: Check local cache first (cheapest - no API call)
+    const cacheData = await chrome.storage.local.get([cacheKey]);
+    if (cacheData[cacheKey]) {
+      const cached = cacheData[cacheKey];
+      const age = Date.now() - cached.timestamp;
+      if (age < VALIDATION_CACHE_TTL) {
+        console.log('[HuntMaster Extension] ✓ Using cached validation result:', cached.exists);
+        return cached.exists;
+      } else {
+        // Cache expired, remove it
+        await chrome.storage.local.remove([cacheKey]);
+      }
+    }
+    
+    // Step 2: Check Supabase database first (cheap - just DB query, no external API)
+    if (sessionToken) {
+      try {
+        const checkUrl = new URL(`${apiBaseUrl}/api/games/check-exists`);
+        checkUrl.searchParams.set('gameTitle', gameTitle.trim());
+        checkUrl.searchParams.set('session', sessionToken);
+        
+        const checkResponse = await fetch(checkUrl.toString(), { cache: 'no-store' });
+        const checkData = await checkResponse.json();
+        
+        if (checkData.success && checkData.exists) {
+          console.log('[HuntMaster Extension] ✓ Game found in database (no external API call needed)');
+          // Cache the result
+          await chrome.storage.local.set({
+            [cacheKey]: {
+              exists: true,
+              timestamp: Date.now(),
+              source: checkData.source
+            }
+          });
+          return true;
+        }
+        
+        // If not found in database, continue to external API check
+        console.log('[HuntMaster Extension] Game not found in database, checking external API...');
+      } catch (error) {
+        console.error('[HuntMaster Extension] Database check failed, falling back to external API:', error);
+      }
+    }
+    
+    // Step 3: Fallback to external API (expensive - only if not found in database)
     // Try searching with the original title first
     const searchUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
     searchUrl.searchParams.set('q', gameTitle.trim());
@@ -99,10 +149,27 @@ async function checkGameExists(gameTitle, apiBaseUrl) {
         );
       }
       
+      // Cache the result (whether found or not)
+      await chrome.storage.local.set({
+        [cacheKey]: {
+          exists: gameExists,
+          timestamp: Date.now(),
+          source: 'external_api'
+        }
+      });
+      
       return gameExists;
     }
     
     console.log('[HuntMaster Extension] Search failed or returned no results');
+    // Cache negative result too (to avoid repeated failed searches)
+    await chrome.storage.local.set({
+      [cacheKey]: {
+        exists: false,
+        timestamp: Date.now(),
+        source: 'external_api_failed'
+      }
+    });
     return false;
   } catch (error) {
     console.error('[HuntMaster Extension] Error checking game existence:', error);
@@ -152,7 +219,7 @@ async function autoUpdateCurrentGame(gameInfo) {
     // Check if game exists in database before updating
     const gameTitleTrimmed = gameInfo.title.trim();
     console.log('[HuntMaster Extension] Checking if game exists in database:', gameTitleTrimmed);
-    const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl);
+    const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken);
     
     if (!gameExists) {
       console.log('[HuntMaster Extension] ⚠️ Game not found in database, skipping auto-update:', gameTitleTrimmed);

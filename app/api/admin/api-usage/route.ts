@@ -126,8 +126,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url)
     const monthParam = url.searchParams.get("month") || undefined
     const targetMonth = getMonthKey(monthParam)
+    
+    // Pagination support - default to 100 users per page
+    const pageParam = url.searchParams.get("page")
+    const limitParam = url.searchParams.get("limit")
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10)) : 1
+    const limit = limitParam ? Math.min(500, Math.max(10, parseInt(limitParam, 10))) : 100
+    const offset = (page - 1) * limit
 
-    const [users, usage] = await Promise.all([
+    const [allUsers, usage] = await Promise.all([
       supabaseAdmin.users.findAll(),
       supabaseAdmin.apiUsage.listCurrentUsage(targetMonth),
     ])
@@ -137,12 +144,13 @@ export async function GET(request: Request) {
       usageMap.set(row.userId, row)
     })
 
-    const dashboardUsers = users.map((user) =>
+    const dashboardUsers = allUsers.map((user) =>
       mapUsageToUser(user, usageMap.get(user.id), user.apiMonthlyLimit ?? null),
     )
 
     dashboardUsers.sort((a, b) => b.monthlySearches - a.monthlySearches)
 
+    // Calculate totals from ALL users (not just paginated)
     const totals = {
       totalUsers: dashboardUsers.length,
       cappedUsers: dashboardUsers.filter((u) => u.monthlyLimit !== null).length,
@@ -151,10 +159,20 @@ export async function GET(request: Request) {
       totalSearches: dashboardUsers.reduce((sum, u) => sum + u.monthlySearches, 0),
     }
 
-    const payload: DashboardPayload = {
+    // Paginate results
+    const paginatedUsers = dashboardUsers.slice(offset, offset + limit)
+    const totalPages = Math.ceil(dashboardUsers.length / limit)
+
+    const payload: DashboardPayload & { pagination?: { page: number; limit: number; totalPages: number; total: number } } = {
       month: targetMonth,
       totals,
-      users: dashboardUsers,
+      users: paginatedUsers,
+      pagination: {
+        page,
+        limit,
+        totalPages,
+        total: dashboardUsers.length,
+      },
     }
 
     return NextResponse.json({ success: true, data: payload })
@@ -220,5 +238,7 @@ export async function PATCH(request: Request) {
     )
   }
 }
+
+
 
 

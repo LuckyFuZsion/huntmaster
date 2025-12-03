@@ -58,6 +58,12 @@ interface DashboardPayload {
     totalSearches: number
   }
   users: DashboardUserRow[]
+  pagination?: {
+    page: number
+    limit: number
+    totalPages: number
+    total: number
+  }
 }
 
 const statusStyles: Record<UsageStatus, { label: string; className: string }> = {
@@ -88,12 +94,14 @@ export default function AdminApiUsagePage() {
   const [statusFilter, setStatusFilter] = useState<UsageStatus | "all">("all")
   const [limitDrafts, setLimitDrafts] = useState<Record<string, string>>({})
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(100)
 
-  const loadUsage = useCallback(async (session: string) => {
+  const loadUsage = useCallback(async (session: string, page: number = 1, limit: number = 100) => {
     setLoading(true)
     setBanner(null)
     try {
-      const response = await fetch("/api/admin/api-usage", {
+      const response = await fetch(`/api/admin/api-usage?page=${page}&limit=${limit}`, {
         headers: {
           "X-Huntmaster-Session": session,
         },
@@ -131,7 +139,7 @@ export default function AdminApiUsagePage() {
         return
       }
       setSessionToken(session)
-      loadUsage(session)
+      loadUsage(session, currentPage, pageSize)
     } catch (error) {
       console.error("Failed to verify admin session:", error)
       router.push("/login")
@@ -508,6 +516,50 @@ export default function AdminApiUsagePage() {
                 </Table>
               </CardContent>
             </Card>
+            
+            {/* Pagination Controls */}
+            {usageData?.pagination && usageData.pagination.totalPages > 1 && (
+              <Card className="bg-gray-900/50 border-gray-800">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-400">
+                      Showing {((usageData.pagination.page - 1) * usageData.pagination.limit) + 1} to{" "}
+                      {Math.min(usageData.pagination.page * usageData.pagination.limit, usageData.pagination.total)} of{" "}
+                      {usageData.pagination.total} users
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={usageData.pagination.page === 1 || loading}
+                        onClick={() => {
+                          const newPage = usageData.pagination!.page - 1
+                          setCurrentPage(newPage)
+                          if (sessionToken) loadUsage(sessionToken, newPage, pageSize)
+                        }}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-400">
+                        Page {usageData.pagination.page} of {usageData.pagination.totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={usageData.pagination.page === usageData.pagination.totalPages || loading}
+                        onClick={() => {
+                          const newPage = usageData.pagination!.page + 1
+                          setCurrentPage(newPage)
+                          if (sessionToken) loadUsage(sessionToken, newPage, pageSize)
+                        }}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </>
         )}
       </div>

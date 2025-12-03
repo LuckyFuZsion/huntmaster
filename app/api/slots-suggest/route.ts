@@ -69,6 +69,43 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: [], total: 0, limit });
     }
 
+    // OPTIMIZATION: Check user's existing slots first (cheap, no external API)
+    // If game exists in user's slots, return it immediately without external API call
+    if (userId) {
+      try {
+        const userSlots = await supabaseAdmin.slots.findByUserId(userId);
+        const normalizedQuery = q.toLowerCase().trim().replace(/[-–—]/g, " ").replace(/\s+/g, " ").trim();
+        
+        const matchingSlot = userSlots.find((slot) => {
+          const slotNormalized = slot.name.toLowerCase().trim().replace(/[-–—]/g, " ").replace(/\s+/g, " ").trim();
+          return slotNormalized === normalizedQuery || slotNormalized.includes(normalizedQuery) || normalizedQuery.includes(slotNormalized);
+        });
+        
+        if (matchingSlot) {
+          console.log(`✅ Game found in user's slots, skipping external API: "${matchingSlot.name}"`);
+          // Return as suggestion format
+          const suggestion = {
+            id: Date.now(),
+            slug: matchingSlot.name.toLowerCase().replace(/\s+/g, "-"),
+            title: matchingSlot.name,
+            provider: undefined,
+          };
+          
+          return NextResponse.json({
+            success: true,
+            data: [suggestion],
+            total: 1,
+            limit,
+            fromCache: false,
+            source: "user_slots", // Indicates this came from user's slots, not external API
+          });
+        }
+      } catch (error) {
+        // If check fails, continue to external API
+        console.log("User slots check failed, using external API:", error);
+      }
+    }
+
     // Check cache first - cache key includes query, limit, and exhaustive flag
     const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
     const cached = getCached(cacheKey)

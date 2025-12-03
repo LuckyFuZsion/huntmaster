@@ -609,6 +609,66 @@ export const supabaseAdmin = {
         bestXWinGame: xWinData && xWinData[0] ? xWinData[0].gameTitle : undefined,
       }
     },
+    
+    async findRecentByUser(userId: string, days: number = 7, minXWin?: number, minWinAmount?: number, limit?: number): Promise<UserWin[]> {
+      const cutoffDate = new Date()
+      cutoffDate.setDate(cutoffDate.getDate() - days)
+      const cutoffISO = cutoffDate.toISOString()
+      
+      // Default limit to 500 to prevent excessive data transfer
+      const queryLimit = limit ?? 500
+      
+      // Try camelCase first
+      let query = getSupabaseAdminClient()
+        .from('userWins')
+        .select('*')
+        .eq('userId', userId)
+        .gte('createdAt', cutoffISO)
+      
+      if (minXWin !== undefined) {
+        query = query.gte('xWin', minXWin)
+      }
+      
+      if (minWinAmount !== undefined) {
+        query = query.gte('winAmount', minWinAmount)
+      }
+      
+      let { data, error } = await query.order('winAmount', { ascending: false }).limit(queryLimit)
+      
+      // If camelCase fails, try snake_case
+      if (error && (error.code === '42703' || error.message?.includes('column'))) {
+        let snakeQuery = getSupabaseAdminClient()
+          .from('userWins')
+          .select('*')
+          .eq('user_id', userId)
+          .gte('created_at', cutoffISO)
+        
+        if (minXWin !== undefined) {
+          snakeQuery = snakeQuery.gte('x_win', minXWin)
+        }
+        
+        if (minWinAmount !== undefined) {
+          snakeQuery = snakeQuery.gte('win_amount', minWinAmount)
+        }
+        
+        const result = await snakeQuery.order('win_amount', { ascending: false }).limit(queryLimit)
+        data = result.data
+        error = result.error
+      }
+      
+      if (error) throw error
+      return (data || []).map((win: any) => ({
+        id: win.id,
+        userId: win.userId || win.user_id,
+        gameTitle: win.gameTitle || win.game_title,
+        gameSlug: win.gameSlug || win.game_slug,
+        provider: win.provider,
+        bet: win.bet,
+        winAmount: win.winAmount || win.win_amount,
+        xWin: win.xWin || win.x_win,
+        createdAt: win.createdAt || win.created_at,
+      }))
+    },
   },
 
   // Current Game operations
