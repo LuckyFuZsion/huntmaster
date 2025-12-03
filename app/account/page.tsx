@@ -15,7 +15,8 @@ import {
   TrendingUp,
   AlertTriangle,
   CheckCircle,
-  Infinity
+  Infinity,
+  Trophy
 } from "lucide-react";
 import Link from "next/link";
 
@@ -252,6 +253,31 @@ export default function AccountPage() {
               </CardContent>
             </Card>
 
+            {/* Biggest Wins Card */}
+            <Card className="bg-gradient-to-br from-amber-950 to-amber-900 border-amber-800 cursor-pointer hover:border-amber-600 transition-colors">
+              <Link href={`/wins-dashboard?username=${encodeURIComponent(username)}`}>
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Trophy className="w-5 h-5" />
+                    Biggest Wins
+                  </CardTitle>
+                  <CardDescription className="text-gray-300">
+                    View your best wins per game
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <p className="text-gray-300 text-sm">
+                      See your biggest win for each game you've played
+                    </p>
+                    <Button variant="outline" size="sm" className="ml-4">
+                      View Wins
+                    </Button>
+                  </div>
+                </CardContent>
+              </Link>
+            </Card>
+
             {/* Info Card */}
             <Card className="bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700 md:col-span-2">
               <CardHeader>
@@ -259,7 +285,7 @@ export default function AccountPage() {
               </CardHeader>
               <CardContent className="text-gray-300 space-y-2 text-sm">
                 <p>
-                  • <strong>Cached searches don't count:</strong> If you search for the same game within 24 hours, it's free!
+                  • <strong>Cached searches don't count:</strong> If you search for the same game within 30 days, it's free!
                 </p>
                 <p>
                   • <strong>Monthly reset:</strong> Your usage resets automatically on the 1st of each month.

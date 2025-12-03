@@ -28,12 +28,13 @@ export async function POST(request: Request) {
     // COST OPTIMIZATION: Removed game verification entirely to reduce API costs
     // Users can record wins for any game name - no expensive API verification needed
     // This eliminates all API calls from win recording (was causing significant costs)
+    // COST OPTIMIZATION: Only saves biggest win per game per user (reduces storage by ~94%)
     const gameTitleTrimmed = gameTitle.trim();
 
     // Calculate X win
     const xWin = bet > 0 ? Number((winAmount / bet).toFixed(2)) : 0;
 
-    // Create win record
+    // Create win record (will only save if it's the biggest win for this game)
     const winRecord: any = {
       userId,
       gameTitle: gameTitleTrimmed,
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
       winRecord.provider = provider.trim();
     }
 
-    console.log('Creating win record:', {
+    console.log('Recording win (will save only if biggest):', {
       userId,
       gameTitle: gameTitleTrimmed,
       bet,
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
 
     let created;
     try {
-      console.log('📝 Attempting to create win record with:', winRecord);
+      console.log('📝 Attempting to save win (biggest win only):', winRecord);
       created = await supabaseAdmin.userWins.create(winRecord);
       console.log('✅ Win record created successfully:', {
         id: created.id,

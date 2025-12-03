@@ -506,7 +506,7 @@ export const supabaseAdmin = {
   userWins: {
     async create(win: Omit<UserWin, 'id' | 'createdAt'>): Promise<UserWin> {
       try {
-        console.log('Attempting to insert userWin:', {
+        console.log('Attempting to upsert userWin (biggest win only):', {
           userId: win.userId,
           gameTitle: win.gameTitle,
           bet: win.bet,
@@ -515,7 +515,70 @@ export const supabaseAdmin = {
           provider: win.provider
         });
         
-        const { data, error } = await getSupabaseAdminClient()
+        // COST OPTIMIZATION: Only save biggest win per game per user
+        // Check if a win already exists for this user+game
+        const { data: existing, error: fetchError } = await getSupabaseAdminClient()
+          .from('userWins')
+          .select('*')
+          .eq('userId', win.userId)
+          .eq('gameTitle', win.gameTitle)
+          .maybeSingle()
+        
+        if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found, which is fine
+          console.error('❌ Error checking existing win:', fetchError);
+          throw fetchError;
+        }
+        
+        // If win exists, only update if new win is bigger (by winAmount or xWin)
+        if (existing) {
+          const isBiggerWin = win.winAmount > (existing.winAmount || 0);
+          const isBiggerXWin = win.xWin > (existing.xWin || 0);
+          
+          if (!isBiggerWin && !isBiggerXWin) {
+            console.log('⚠️ New win is not bigger, keeping existing:', {
+              existing: { winAmount: existing.winAmount, xWin: existing.xWin },
+              new: { winAmount: win.winAmount, xWin: win.xWin }
+            });
+            return existing; // Return existing win, don't update
+          }
+          
+          console.log('✅ New win is bigger, updating:', {
+            existing: { winAmount: existing.winAmount, xWin: existing.xWin },
+            new: { winAmount: win.winAmount, xWin: win.xWin }
+          });
+          
+          // Update existing record
+          const { data: updated, error: updateError } = await getSupabaseAdminClient()
+            .from('userWins')
+            .update({
+              bet: win.bet,
+              winAmount: win.winAmount,
+              xWin: win.xWin,
+              provider: win.provider || existing.provider,
+              gameSlug: win.gameSlug || existing.gameSlug,
+              createdAt: new Date().toISOString(), // Update timestamp to reflect when biggest win was achieved
+            })
+            .eq('id', existing.id)
+            .select()
+            .single()
+          
+          if (updateError) {
+            console.error('❌ Supabase update error:', updateError);
+            throw updateError;
+          }
+          
+          console.log('✅ UserWin updated successfully (biggest win):', {
+            id: updated.id,
+            userId: updated.userId,
+            gameTitle: updated.gameTitle,
+            winAmount: updated.winAmount
+          });
+          
+          return updated;
+        }
+        
+        // No existing win, create new record
+        const { data: created, error: insertError } = await getSupabaseAdminClient()
           .from('userWins')
           .insert({
             ...win,
@@ -524,25 +587,25 @@ export const supabaseAdmin = {
           .select()
           .single()
         
-        if (error) {
+        if (insertError) {
           console.error('❌ Supabase insert error:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint,
+            message: insertError.message,
+            code: insertError.code,
+            details: insertError.details,
+            hint: insertError.hint,
             winData: win
           });
-          throw error;
+          throw insertError;
         }
         
-        console.log('✅ UserWin inserted successfully:', {
-          id: data.id,
-          userId: data.userId,
-          gameTitle: data.gameTitle,
-          winAmount: data.winAmount
+        console.log('✅ UserWin created successfully (first win for this game):', {
+          id: created.id,
+          userId: created.userId,
+          gameTitle: created.gameTitle,
+          winAmount: created.winAmount
         });
         
-        return data;
+        return created;
       } catch (err) {
         console.error('❌ Error in userWins.create:', err);
         throw err;

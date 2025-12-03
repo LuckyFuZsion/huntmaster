@@ -3,7 +3,7 @@ export const maxDuration = 30 // 30 seconds max
 
 // Simple in-memory cache with TTL to reduce expensive external API calls
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 86400000 // 24 hours (86400 seconds) - game data rarely changes
+const CACHE_TTL = 30 * 24 * 60 * 60 * 1000 // 30 days - game data is extremely stable (games rarely get renamed/deleted, new games don't affect cached searches)
 const MAX_CACHE_SIZE = 1000 // Limit cache to 1000 entries to prevent memory issues
 
 function getCached(key: string) {
