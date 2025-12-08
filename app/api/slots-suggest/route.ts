@@ -106,34 +106,12 @@ export async function GET(request: Request) {
       }
     }
 
-    // Check cache first - cache key includes query, limit, and exhaustive flag
+    // Skip cache for browser extension requests (when session token is provided)
+    // Browser extension needs fresh results and doesn't need caching
+    const isBrowserExtension = !!userId; // If session token is provided, it's likely the browser extension
     const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
-    const cached = getCached(cacheKey)
+    const cached = !isBrowserExtension ? getCached(cacheKey) : null
     if (cached) {
-      // Apply filtering to cached results too (in case cache was set before filtering was added)
-      const normalizedQuery = q.toLowerCase().trim();
-      if (cached.data && Array.isArray(cached.data)) {
-        const filteredCached = cached.data.filter((item: any) => {
-          if (!item.title) return false;
-          const normalizedTitle = item.title.toLowerCase().trim();
-          return normalizedTitle.includes(normalizedQuery);
-        });
-        
-        // Return filtered cached results
-        const filteredCachedResponse = {
-          ...cached,
-          data: filteredCached,
-          metadata: {
-            ...cached.metadata,
-            filteredResults: filteredCached.length,
-            totalBeforeFilter: cached.data.length,
-          }
-        };
-        
-        console.log(`✅ Cache hit for slots-suggest: "${q}" (Filtered: ${cached.data.length} → ${filteredCached.length})`)
-        return NextResponse.json(filteredCachedResponse)
-      }
-      
       console.log(`✅ Cache hit for slots-suggest: "${q}" (Cache stats: ${getApiStats().cacheHits} hits, ${getApiStats().totalApiCalls} calls)`)
       return NextResponse.json(cached)
     }
@@ -191,29 +169,6 @@ export async function GET(request: Request) {
       console.warn(`Slot Streamers API error (${ssRes.status}) for query: "${q}"`);
     }
 
-    // FIX: If query is all lowercase and we got few results, also try capitalized version
-    // This catches games like "Mental" and "Mental 2" that might not be returned when searching "mental"
-    const isAllLowercase = q === q.toLowerCase() && q !== q.toUpperCase() && q.trim().length > 0;
-    const capitalizedQuery = q.charAt(0).toUpperCase() + q.slice(1).toLowerCase();
-    let additionalSSItems: any[] = [];
-    
-    if (isAllLowercase && ssItems.length < 10 && !ssRateLimited && capitalizedQuery !== q) {
-      console.log(`🔄 Also trying capitalized search: "${capitalizedQuery}" (original query "${q}" returned ${ssItems.length} results)`);
-      const suggestSSUrlCapitalized = new URL(`/api/slot-streamers/suggest-games`, origin);
-      suggestSSUrlCapitalized.searchParams.set("q", capitalizedQuery);
-      suggestSSUrlCapitalized.searchParams.set("limit", String(limit));
-      
-      try {
-        const ssResCapitalized = await fetch(suggestSSUrlCapitalized.toString(), { cache: "no-store" });
-        if (ssResCapitalized.ok) {
-          const ssJsonCapitalized = await ssResCapitalized.json();
-          additionalSSItems = Array.isArray(ssJsonCapitalized?.data) ? ssJsonCapitalized.data : [];
-          console.log(`✅ Capitalized search returned ${additionalSSItems.length} additional results`);
-        }
-      } catch (e) {
-        console.error("Error in capitalized search:", e);
-      }
-    }
 
     // SMART FALLBACK: Use SlotsLaunch to get additional results when needed
     // Cost optimization: Only call SlotsLaunch if:
@@ -317,8 +272,8 @@ export async function GET(request: Request) {
     });
 
     // Combine results: Prioritize Slot Streamers, then add SlotsLaunch results
-    // Put Slot Streamers items first, then add additional capitalized search results, then add SlotsLaunch items that don't already exist
-    const combined = [...ssItems, ...additionalSSItems];
+    // Put Slot Streamers items first, then add SlotsLaunch items that don't already exist
+    const combined = [...ssItems];
     const seen = new Map<string, any>();
     
     // Add Slot Streamers items first (these take priority)
@@ -370,17 +325,12 @@ export async function GET(request: Request) {
     
     const deduped = Array.from(seen.values());
 
-    // Filter results to only include games where the title contains the search query
-    // This ensures we don't return irrelevant games that the APIs might match on provider/description
-    const normalizedQuery = q.toLowerCase().trim();
-    const filtered = deduped.filter((item) => {
-      if (!item.title) return false;
-      const normalizedTitle = item.title.toLowerCase().trim();
-      // Check if the title contains the search query (case-insensitive)
-      return normalizedTitle.includes(normalizedQuery);
-    });
+    // For browser extension: trust API results completely, no filtering
+    // For web app: minimal filtering - just ensure results have titles
+    // The API handles all matching logic, we just return what it gives us
+    const filtered = deduped.filter((item) => item.title); // Just ensure title exists
     
-    console.log(`🔍 Filtered results: ${deduped.length} → ${filtered.length} (query: "${q}")`);
+    console.log(`🔍 Results: ${deduped.length} total, ${filtered.length} after filtering (query: "${q}", browserExtension: ${isBrowserExtension})`);
 
     // Include minimal pagination hint from SlotsLaunch if present
     const pagination = slJson?.total_pages
@@ -411,8 +361,10 @@ export async function GET(request: Request) {
       ...(warnings.length > 0 && { warnings, rateLimited: true })
     }
     
-    // Cache the response
-    setCache(cacheKey, response)
+    // Only cache for web app requests (not browser extension)
+    if (!isBrowserExtension) {
+      setCache(cacheKey, response)
+    }
     
     // Increment user's API usage count (only if userId provided and API call was made)
     if (userId) {
