@@ -51,6 +51,7 @@ function normalizeUser(user: any): User {
     huntmaster: user.huntmaster ?? false, // Default to false for safety
     huntmasterAdmin: user.huntmasterAdmin ?? user.huntmaster_admin ?? false,
     createdAt: user.createdAt ?? user.created_at ?? new Date(),
+    apiMonthlyLimit: user.apiMonthlyLimit ?? user.api_monthly_limit ?? null,
   }
 }
 
@@ -66,6 +67,7 @@ export interface User {
   huntmaster?: boolean // Access flag for HuntMaster application
   huntmasterAdmin?: boolean // Admin flag for HuntMaster (separate from main app admin)
   createdAt: Date | string
+  apiMonthlyLimit?: number | null
 }
 
 export interface Slot {
@@ -134,6 +136,22 @@ export interface CurrentGame {
   gameTitle: string
   provider?: string
   updatedAt: Date | string
+}
+
+export interface UserApiUsageRecord {
+  id: string
+  userId: string
+  monthlySearches: number
+  monthlyLimit: number | null
+  currentMonth: string
+  updatedAt?: string | null
+  lastResetAt?: string | null
+}
+
+function getCurrentMonthKey(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
 }
 
 // Supabase database operations (mirroring firestoreAdmin interface)
@@ -223,6 +241,7 @@ export const supabaseAdmin = {
         email: userData.email,
         discordId: userData.discordId,
         createdAt: new Date().toISOString(),
+        apiMonthlyLimit: userData.apiMonthlyLimit ?? null,
       }
       
       // Try camelCase first
@@ -254,6 +273,7 @@ export const supabaseAdmin = {
             huntmaster: userData.huntmaster ?? false,
             huntmaster_admin: userData.huntmasterAdmin ?? false,
             created_at: new Date().toISOString(),
+            api_monthly_limit: userData.apiMonthlyLimit ?? null,
           }
           
           const { data: snakeData, error: snakeError } = await getSupabaseAdminClient()
@@ -290,6 +310,7 @@ export const supabaseAdmin = {
         if (updateData.email !== undefined) snakeCaseData.email = updateData.email
         if (updateData.password !== undefined) snakeCaseData.password = updateData.password
         if (updateData.username !== undefined) snakeCaseData.username = updateData.username
+        if (updateData.apiMonthlyLimit !== undefined) snakeCaseData.api_monthly_limit = updateData.apiMonthlyLimit
         
         const { error: snakeError } = await getSupabaseAdminClient()
           .from('users')
@@ -361,6 +382,23 @@ export const supabaseAdmin = {
       
       if (error) throw error
       return data
+    },
+    
+    async createBatch(slotsData: Array<Omit<Slot, 'id' | 'createdAt'>>): Promise<Slot[]> {
+      if (slotsData.length === 0) return []
+      
+      const { data, error } = await getSupabaseAdminClient()
+        .from('slots')
+        .insert(
+          slotsData.map(slot => ({
+            ...slot,
+            createdAt: new Date().toISOString(),
+          }))
+        )
+        .select()
+      
+      if (error) throw error
+      return data || []
     },
     
     async update(id: string, data: Partial<Omit<Slot, 'id'>>): Promise<void> {
@@ -468,7 +506,7 @@ export const supabaseAdmin = {
   userWins: {
     async create(win: Omit<UserWin, 'id' | 'createdAt'>): Promise<UserWin> {
       try {
-        console.log('Attempting to insert userWin:', {
+        console.log('Attempting to upsert userWin (biggest win only):', {
           userId: win.userId,
           gameTitle: win.gameTitle,
           bet: win.bet,
@@ -477,7 +515,70 @@ export const supabaseAdmin = {
           provider: win.provider
         });
         
-        const { data, error } = await getSupabaseAdminClient()
+        // COST OPTIMIZATION: Only save biggest win per game per user
+        // Check if a win already exists for this user+game
+        const { data: existing, error: fetchError } = await getSupabaseAdminClient()
+          .from('userWins')
+          .select('*')
+          .eq('userId', win.userId)
+          .eq('gameTitle', win.gameTitle)
+          .maybeSingle()
+        
+        if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found, which is fine
+          console.error('❌ Error checking existing win:', fetchError);
+          throw fetchError;
+        }
+        
+        // If win exists, only update if new win is bigger (by winAmount or xWin)
+        if (existing) {
+          const isBiggerWin = win.winAmount > (existing.winAmount || 0);
+          const isBiggerXWin = win.xWin > (existing.xWin || 0);
+          
+          if (!isBiggerWin && !isBiggerXWin) {
+            console.log('⚠️ New win is not bigger, keeping existing:', {
+              existing: { winAmount: existing.winAmount, xWin: existing.xWin },
+              new: { winAmount: win.winAmount, xWin: win.xWin }
+            });
+            return existing; // Return existing win, don't update
+          }
+          
+          console.log('✅ New win is bigger, updating:', {
+            existing: { winAmount: existing.winAmount, xWin: existing.xWin },
+            new: { winAmount: win.winAmount, xWin: win.xWin }
+          });
+          
+          // Update existing record
+          const { data: updated, error: updateError } = await getSupabaseAdminClient()
+            .from('userWins')
+            .update({
+              bet: win.bet,
+              winAmount: win.winAmount,
+              xWin: win.xWin,
+              provider: win.provider || existing.provider,
+              gameSlug: win.gameSlug || existing.gameSlug,
+              createdAt: new Date().toISOString(), // Update timestamp to reflect when biggest win was achieved
+            })
+            .eq('id', existing.id)
+            .select()
+            .single()
+          
+          if (updateError) {
+            console.error('❌ Supabase update error:', updateError);
+            throw updateError;
+          }
+          
+          console.log('✅ UserWin updated successfully (biggest win):', {
+            id: updated.id,
+            userId: updated.userId,
+            gameTitle: updated.gameTitle,
+            winAmount: updated.winAmount
+          });
+          
+          return updated;
+        }
+        
+        // No existing win, create new record
+        const { data: created, error: insertError } = await getSupabaseAdminClient()
           .from('userWins')
           .insert({
             ...win,
@@ -486,25 +587,25 @@ export const supabaseAdmin = {
           .select()
           .single()
         
-        if (error) {
+        if (insertError) {
           console.error('❌ Supabase insert error:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint,
+            message: insertError.message,
+            code: insertError.code,
+            details: insertError.details,
+            hint: insertError.hint,
             winData: win
           });
-          throw error;
+          throw insertError;
         }
         
-        console.log('✅ UserWin inserted successfully:', {
-          id: data.id,
-          userId: data.userId,
-          gameTitle: data.gameTitle,
-          winAmount: data.winAmount
+        console.log('✅ UserWin created successfully (first win for this game):', {
+          id: created.id,
+          userId: created.userId,
+          gameTitle: created.gameTitle,
+          winAmount: created.winAmount
         });
         
-        return data;
+        return created;
       } catch (err) {
         console.error('❌ Error in userWins.create:', err);
         throw err;
@@ -571,6 +672,66 @@ export const supabaseAdmin = {
         bestXWinGame: xWinData && xWinData[0] ? xWinData[0].gameTitle : undefined,
       }
     },
+    
+    async findRecentByUser(userId: string, days: number = 7, minXWin?: number, minWinAmount?: number, limit?: number): Promise<UserWin[]> {
+      const cutoffDate = new Date()
+      cutoffDate.setDate(cutoffDate.getDate() - days)
+      const cutoffISO = cutoffDate.toISOString()
+      
+      // Default limit to 500 to prevent excessive data transfer
+      const queryLimit = limit ?? 500
+      
+      // Try camelCase first
+      let query = getSupabaseAdminClient()
+        .from('userWins')
+        .select('*')
+        .eq('userId', userId)
+        .gte('createdAt', cutoffISO)
+      
+      if (minXWin !== undefined) {
+        query = query.gte('xWin', minXWin)
+      }
+      
+      if (minWinAmount !== undefined) {
+        query = query.gte('winAmount', minWinAmount)
+      }
+      
+      let { data, error } = await query.order('winAmount', { ascending: false }).limit(queryLimit)
+      
+      // If camelCase fails, try snake_case
+      if (error && (error.code === '42703' || error.message?.includes('column'))) {
+        let snakeQuery = getSupabaseAdminClient()
+          .from('userWins')
+          .select('*')
+          .eq('user_id', userId)
+          .gte('created_at', cutoffISO)
+        
+        if (minXWin !== undefined) {
+          snakeQuery = snakeQuery.gte('x_win', minXWin)
+        }
+        
+        if (minWinAmount !== undefined) {
+          snakeQuery = snakeQuery.gte('win_amount', minWinAmount)
+        }
+        
+        const result = await snakeQuery.order('win_amount', { ascending: false }).limit(queryLimit)
+        data = result.data
+        error = result.error
+      }
+      
+      if (error) throw error
+      return (data || []).map((win: any) => ({
+        id: win.id,
+        userId: win.userId || win.user_id,
+        gameTitle: win.gameTitle || win.game_title,
+        gameSlug: win.gameSlug || win.game_slug,
+        provider: win.provider,
+        bet: win.bet,
+        winAmount: win.winAmount || win.win_amount,
+        xWin: win.xWin || win.x_win,
+        createdAt: win.createdAt || win.created_at,
+      }))
+    },
   },
 
   // Current Game operations
@@ -634,6 +795,154 @@ export const supabaseAdmin = {
     
     async clear(userId: string): Promise<void> {
       await this.delete(userId)
+    },
+  },
+
+  // API Usage tracking and capping
+  apiUsage: {
+    /**
+     * Check if user can make an API request (hasn't exceeded monthly limit)
+     * Returns: { canMakeRequest: boolean, monthlySearches: number, monthlyLimit: number, remaining: number }
+     */
+    async checkLimit(userId: string | null): Promise<{ canMakeRequest: boolean; monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      if (!userId) {
+        // No user = unlimited (for backward compatibility)
+        return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+
+      try {
+        const { data, error } = await getSupabaseAdminClient()
+          .rpc('get_user_api_usage', { p_user_id: userId })
+
+        if (error) {
+          console.error('Error checking API usage limit:', error)
+          // On error, allow request (fail open for reliability)
+          return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        if (!data || data.length === 0) {
+          // No record = unlimited or first time
+          return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        const usage = data[0]
+        return {
+          canMakeRequest: usage.can_make_request ?? true,
+          monthlySearches: usage.monthly_searches ?? 0,
+          monthlyLimit: usage.monthly_limit,
+          remaining: usage.monthly_limit ? Math.max(0, usage.monthly_limit - (usage.monthly_searches ?? 0)) : null
+        }
+      } catch (error) {
+        console.error('Error checking API usage limit:', error)
+        // Fail open - allow request on error
+        return { canMakeRequest: true, monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+    },
+
+    /**
+     * Increment API usage count for a user
+     * Returns: { monthlySearches: number, monthlyLimit: number, remaining: number }
+     */
+    async increment(userId: string | null): Promise<{ monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      if (!userId) {
+        // No user = don't track
+        return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+
+      try {
+        const { data, error } = await getSupabaseAdminClient()
+          .rpc('increment_api_usage', { p_user_id: userId })
+
+        if (error) {
+          console.error('Error incrementing API usage:', error)
+          return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        if (!data || data.length === 0) {
+          return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+        }
+
+        const usage = data[0]
+        return {
+          monthlySearches: usage.monthly_searches ?? 0,
+          monthlyLimit: usage.monthly_limit,
+          remaining: usage.remaining ?? null
+        }
+      } catch (error) {
+        console.error('Error incrementing API usage:', error)
+        return { monthlySearches: 0, monthlyLimit: null, remaining: null }
+      }
+    },
+
+    /**
+     * Set monthly limit for a user (for tier-based pricing)
+     */
+    async setLimit(userId: string, limit: number | null): Promise<void> {
+      try {
+        const client = getSupabaseAdminClient()
+        const { error } = await client
+          .from('users')
+          .update({ apiMonthlyLimit: limit })
+          .eq('id', userId)
+        
+        if (error) {
+          console.error('Error setting API limit:', error)
+          throw error
+        }
+
+        // Keep usage rows in sync with the new limit
+        await client
+          .from('user_api_usage')
+          .update({ monthlyLimit: limit })
+          .eq('userId', userId)
+          .eq('currentMonth', getCurrentMonthKey())
+      } catch (error) {
+        console.error('Error setting API limit:', error)
+        throw error
+      }
+    },
+
+    /**
+     * Get current usage for a user
+     */
+    async getUsage(userId: string): Promise<{ monthlySearches: number; monthlyLimit: number | null; remaining: number | null }> {
+      return this.checkLimit(userId)
+    },
+
+    async listCurrentUsage(month?: string): Promise<UserApiUsageRecord[]> {
+      const targetMonth = month || getCurrentMonthKey()
+      const { data, error } = await getSupabaseAdminClient()
+        .from('user_api_usage')
+        .select('*')
+        .eq('currentMonth', targetMonth)
+
+      if (error) {
+        console.error('Error listing API usage:', error)
+        throw error
+      }
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        userId: row.userId ?? row.user_id,
+        monthlySearches: row.monthlySearches ?? row.monthly_searches ?? 0,
+        monthlyLimit: row.monthlyLimit ?? row.monthly_limit ?? null,
+        currentMonth: row.currentMonth ?? row.current_month ?? targetMonth,
+        updatedAt: row.updatedAt ?? row.updated_at ?? null,
+        lastResetAt: row.lastResetAt ?? row.last_reset_at ?? null,
+      }))
+    },
+
+    async resetUserUsage(userId: string, month?: string): Promise<void> {
+      const targetMonth = month || getCurrentMonthKey()
+      const { error } = await getSupabaseAdminClient()
+        .from('user_api_usage')
+        .delete()
+        .match({ userId, currentMonth: targetMonth })
+
+      if (error) {
+        console.error('Error resetting API usage:', error)
+        throw error
+      }
     },
   },
 }

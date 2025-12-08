@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
-// Simple in-memory cache with TTL
+// Simple in-memory cache with TTL and size limit
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 5000 // 5 seconds
+const CACHE_TTL = 30000 // 30 seconds (increased from 5s to reduce database queries)
+const MAX_CACHE_SIZE = 500 // Limit cache to 500 entries to prevent memory issues
 
 function getCached(key: string) {
   const cached = cache.get(key)
@@ -19,6 +20,24 @@ function getCached(key: string) {
 }
 
 function setCache(key: string, data: any) {
+  // If cache is full, remove oldest entries (LRU-like behavior)
+  if (cache.size >= MAX_CACHE_SIZE) {
+    // Find and remove oldest entry
+    let oldestKey: string | null = null
+    let oldestTime = Date.now()
+    
+    for (const [k, v] of cache.entries()) {
+      if (v.timestamp < oldestTime) {
+        oldestTime = v.timestamp
+        oldestKey = k
+      }
+    }
+    
+    if (oldestKey) {
+      cache.delete(oldestKey)
+    }
+  }
+  
   cache.set(key, { data, timestamp: Date.now() })
 }
 

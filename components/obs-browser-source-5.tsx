@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Trophy, Zap, Sparkles, Flame, Skull, DollarSign } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 import { useSupabaseSlotsByUsername } from "@/lib/hooks/useSupabaseSlotsByUsername"
@@ -62,9 +62,36 @@ export default function OBSBrowserSource5() {
     }
   }, [username])
 
+  const previousSettingsRef = useRef<string | null>(null)
+  const previousSlotsLengthRef = useRef<number>(0)
+  const lastReloadTimeRef = useRef<number>(0)
+  
   useEffect(() => {
     if (settingsData?.settings) {
       const s = settingsData.settings
+      const settingsKey = `${s.startBalance}-${s.endBalance}`
+      
+      // Check if settings changed (especially if balances were cleared)
+      const settingsChanged = previousSettingsRef.current !== settingsKey
+      const previousKey = previousSettingsRef.current
+      previousSettingsRef.current = settingsKey
+      
+      // If settings changed, reload slots (workaround for DELETE events not firing)
+      // This catches "Start new hunt" which clears balances
+      if (settingsChanged && slotsData?.refetch) {
+        console.log('🔄 Settings updated - reloading slots to sync with database', {
+          previousKey,
+          newKey: settingsKey,
+          currentSlotsCount: slots.length
+        })
+        // Small delay to ensure database operations complete
+        setTimeout(() => {
+          if (slotsData?.refetch) {
+            slotsData.refetch()
+          }
+        }, 500)
+      }
+      
       // Only update if value exists (not null/undefined/empty)
       if (s.startBalance != null && s.startBalance !== "") {
         setStartBalance(Number.parseFloat(s.startBalance) || 0)
@@ -73,7 +100,36 @@ export default function OBSBrowserSource5() {
         setEndBalance(Number.parseFloat(s.endBalance) || 0)
       }
     }
-  }, [settingsData?.settings])
+  }, [settingsData?.settings, slotsData, slots.length])
+  
+  // Additional workaround: Detect when slot count decreases unexpectedly
+  // This catches individual slot deletions that don't trigger settings updates
+  useEffect(() => {
+    const currentLength = slots.length
+    const previousLength = previousSlotsLengthRef.current
+    
+    // If we had slots and now have fewer, reload to sync with database
+    // But only if it's been at least 1 second since last reload to avoid spam
+    if (previousLength > 0 && currentLength < previousLength) {
+      const timeSinceLastReload = Date.now() - lastReloadTimeRef.current
+      if (timeSinceLastReload > 1000 && slotsData?.refetch) {
+        console.log('🔄 Slot count decreased unexpectedly - reloading to sync', {
+          previousLength,
+          currentLength,
+          timeSinceLastReload
+        })
+        lastReloadTimeRef.current = Date.now()
+        setTimeout(() => {
+          if (slotsData?.refetch) {
+            slotsData.refetch()
+          }
+        }, 300)
+      }
+    }
+    
+    previousSlotsLengthRef.current = currentLength
+  }, [slots.length, slotsData])
+  
 
   useEffect(() => {
     const interval = setInterval(() => {

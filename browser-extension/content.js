@@ -131,19 +131,70 @@
       const cryptocasinoSuffixMatch = title.match(cryptocasinoSuffixPattern);
       if (cryptocasinoSuffixMatch) {
         let cleanedTitle = cryptocasinoSuffixMatch[1].trim();
-        // Check if there's a provider separator (dash) in the cleaned title
-        const providerSepPattern = /^(.+?)\s*-\s*(.+)$/;
-        const providerSepMatch = cleanedTitle.match(providerSepPattern);
-        if (providerSepMatch) {
-          // Title has provider separated by dash (e.g., "Game Name - Pragmatic Play by | CryptoCasino.com")
-          const gameTitle = providerSepMatch[1].trim();
-          let provider = providerSepMatch[2].trim();
-          provider = formatProviderName(provider);
-          return { title: gameTitle, provider: provider };
+        
+        // Reject if cleaned title is clearly just a domain name
+        const titleLower = cleanedTitle.toLowerCase();
+        if (titleLower.match(/^[a-z0-9-]+\.(com|net|org)$/) || 
+            titleLower === 'cryptocasino' ||
+            titleLower === 'casino') {
+          // Not a valid game title, skip this pattern
+          return null;
+        }
+        
+        // If we have provider from URL, be very careful about splitting on dashes
+        // Only split if the part after dash is clearly a known provider name
+        // Otherwise, treat the entire title as the game name (e.g., "Zeus vs Hades - Gods of War" -> full title)
+        if (providerFromUrl) {
+          // Check if there's a dash in the title
+          const providerSepPattern = /^(.+?)\s*-\s*(.+)$/;
+          const providerSepMatch = cleanedTitle.match(providerSepPattern);
+          if (providerSepMatch) {
+            const potentialProvider = providerSepMatch[2].trim();
+            const formattedProvider = formatProviderName(potentialProvider);
+            
+            // Known provider names (check against formatted version)
+            const knownProviderNames = [
+              'pragmatic play', 'nolimit city', 'play\'n go', 'netent', 'microgaming',
+              'evolution', 'red tiger', 'push gaming', 'yggdrasil', 'big time gaming', 'relax gaming',
+              'thunderkick', 'quickspin', 'blueprint', 'hacksaw', 'kalamba', 'nucleus'
+            ];
+            
+            const potentialProviderLower = formattedProvider.toLowerCase();
+            const isKnownProvider = knownProviderNames.some(known => 
+              potentialProviderLower === known || 
+              potentialProviderLower.includes(known) ||
+              known.includes(potentialProviderLower)
+            );
+            
+            // Also check if it's a very short single word (likely part of game name like "Day" in "D-Day")
+            const isShortSingleWord = potentialProvider.length < 8 && !potentialProvider.includes(' ');
+            
+            if (isKnownProvider && !isShortSingleWord) {
+              // It's a known provider, split on dash
+              const gameTitle = providerSepMatch[1].trim();
+              return { title: gameTitle, provider: formattedProvider };
+            } else {
+              // Not a known provider - treat entire title as game name (e.g., "Zeus vs Hades - Gods of War")
+              return { title: cleanedTitle, provider: providerFromUrl };
+            }
+          } else {
+            // No dash in title - use entire title as game name
+            return { title: cleanedTitle, provider: providerFromUrl };
+          }
         } else {
-          // No provider in title (e.g., "Sweet Bonanza by | CryptoCasino.com")
-          // Use provider from URL if available (extracted from /casino/pragmatic-play/...)
-          return { title: cleanedTitle, provider: providerFromUrl };
+          // No provider from URL, try to extract from title
+          const providerSepPattern = /^(.+?)\s*-\s*(.+)$/;
+          const providerSepMatch = cleanedTitle.match(providerSepPattern);
+          if (providerSepMatch) {
+            // Title has provider separated by dash
+            const gameTitle = providerSepMatch[1].trim();
+            let provider = providerSepMatch[2].trim();
+            provider = formatProviderName(provider);
+            return { title: gameTitle, provider: provider };
+          } else {
+            // No provider in title
+            return { title: cleanedTitle, provider: null };
+          }
         }
       }
       
@@ -158,13 +209,21 @@
           let provider = withProviderMatch[2].trim();
           // Remove "for free" or any trailing text
           provider = provider.replace(/\s+for\s+free.*$/i, '').trim();
-          provider = formatProviderName(provider);
           
-          return { title: gameTitle, provider: provider };
+          // If we have provider from URL and the extracted provider looks like a game name (short, single word),
+          // use the provider from URL instead and keep the full title as game name
+          if (providerFromUrl && provider.length < 15 && !provider.includes(' ')) {
+            // Likely a game name with dash (e.g., "D-Day"), use provider from URL
+            const fullTitle = `${gameTitle} - ${provider}`;
+            return { title: fullTitle, provider: providerFromUrl };
+          } else {
+            // Normal case: provider in title
+            provider = formatProviderName(provider);
+            return { title: gameTitle, provider: provider };
+          }
         }
         
         // Pattern without provider: "Play Game Name" or "Play Game Name for free."
-        // Also handle simple cases like "Play Oops" with no additional text
         const withoutProviderPattern = /^Play\s+(.+?)(?:\s+for\s+free.*?|$)/i;
         const withoutProviderMatch = title.match(withoutProviderPattern);
         if (withoutProviderMatch) {
@@ -261,10 +320,22 @@
       // Try casino-specific parser first
       const casinoSpecific = parseTitleForCasino(pageTitle, casino);
       if (casinoSpecific && casinoSpecific.title) {
-        gameInfo.title = casinoSpecific.title;
-        gameInfo.provider = casinoSpecific.provider || null;
-        gameInfo.source = `page-title-${casino}`;
-      } else {
+        // Only reject if it's clearly just a domain name (very short with .com)
+        const titleLower = casinoSpecific.title.toLowerCase().trim();
+        const isInvalidTitle = 
+          (titleLower.match(/^[a-z0-9-]+\.(com|net|org)$/)) || // Exact domain match like "cryptocasino.com"
+          titleLower === 'cryptocasino' ||
+          titleLower === 'casino';
+        
+        if (!isInvalidTitle) {
+          gameInfo.title = casinoSpecific.title;
+          gameInfo.provider = casinoSpecific.provider || null;
+          gameInfo.source = `page-title-${casino}`;
+        }
+      }
+      
+      // If casino-specific parser didn't find a valid game, fall back to generic patterns
+      if (!gameInfo.title) {
         // Fall back to generic patterns
         for (const pattern of detectionPatterns[0].patterns) {
           const match = pageTitle.match(pattern);
@@ -584,6 +655,9 @@
       }
       
       const gameInfo = extractGameInfo();
+      console.log('[HuntMaster Extension] Detected game info:', gameInfo);
+      console.log('[HuntMaster Extension] Page title:', document.title);
+      console.log('[HuntMaster Extension] Casino detected:', detectCasino());
       // Store in background for popup access
       chrome.runtime.sendMessage({
         type: 'GAME_DETECTED',
@@ -593,12 +667,14 @@
         if (chrome.runtime.lastError) {
           // Extension context invalidated or other error
           // Silently fail - extension may have been reloaded
+          console.log('[HuntMaster Extension] Error sending message:', chrome.runtime.lastError.message);
           return;
         }
+        console.log('[HuntMaster Extension] Message sent successfully, response:', response);
       });
     } catch (error) {
       // Extension context invalidated - this happens when extension is reloaded
-      // Silently fail
+      console.error('[HuntMaster Extension] Error in sendGameInfo:', error);
       return;
     }
   }

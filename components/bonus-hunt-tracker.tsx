@@ -160,7 +160,7 @@ export function BonusHuntTracker() {
   }, [])
 
   // Use real-time subscriptions instead of polling
-  const { slots: realtimeSlots, loading: slotsLoading, error: slotsError } = useSupabaseSlots(userId)
+  const { slots: realtimeSlots, loading: slotsLoading, error: slotsError, refetch: refetchSlots } = useSupabaseSlots(userId)
   const { settings, loading: settingsLoading } = useSupabaseUserSettings(userId)
 
   // Update slots state when real-time data changes
@@ -518,23 +518,28 @@ export function BonusHuntTracker() {
             if (data.success && data.slots) {
               lastSavedSlotsRef.current = JSON.stringify(data.slots.map((s: any) => ({ id: s.id, name: s.name, bet: s.bet, win: s.win })))
               
-              // Only update state if there are actual differences (temporary IDs or count change)
-              const hasTempIds = uniqueSlots.some(slot => slot.id.length <= 15)
-              const slotCountChanged = data.slots.length !== uniqueSlots.length
-              if (hasTempIds || slotCountChanged) {
-                // Deduplicate before setting state
-                const seen = new Set<string>()
-                const deduplicated = data.slots.filter((slot: any) => {
-                  if (seen.has(slot.id)) return false
-                  seen.add(slot.id)
-                  return true
-                }).map((slot: any) => ({
-                  id: slot.id,
-                  name: slot.name,
-                  bet: slot.bet,
-                  win: slot.win,
-                }))
-                setSlots(deduplicated)
+              // If we saved an empty array (clearing all slots), ensure state is empty
+              if (data.slots.length === 0 && uniqueSlots.length === 0) {
+                setSlots([])
+              } else {
+                // Only update state if there are actual differences (temporary IDs or count change)
+                const hasTempIds = uniqueSlots.some(slot => slot.id.length <= 15)
+                const slotCountChanged = data.slots.length !== uniqueSlots.length
+                if (hasTempIds || slotCountChanged) {
+                  // Deduplicate before setting state
+                  const seen = new Set<string>()
+                  const deduplicated = data.slots.filter((slot: any) => {
+                    if (seen.has(slot.id)) return false
+                    seen.add(slot.id)
+                    return true
+                  }).map((slot: any) => ({
+                    id: slot.id,
+                    name: slot.name,
+                    bet: slot.bet,
+                    win: slot.win,
+                  }))
+                  setSlots(deduplicated)
+                }
               }
             }
           }
@@ -907,14 +912,37 @@ ${slotListInfo}`
     try {
       const session = localStorage.getItem("huntmaster_session")
       if (session) {
+        // Clear local state FIRST to prevent race conditions
+        setSlots([])
+        setStartBalance("")
+        setEndBalance("")
+        setNewSlot({ name: "", bet: "" })
+        
         // Clear slots from database
-        await fetch("/api/slots", {
+        const slotsResponse = await fetch("/api/slots", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ session, action: "save", slots: [] }),
         })
+        
+        if (!slotsResponse.ok) {
+          throw new Error("Failed to clear slots")
+        }
+        
+        // Force refetch to ensure real-time subscription is in sync
+        // Wait a bit for the database deletion to propagate, then refetch
+        if (refetchSlots) {
+          setTimeout(async () => {
+            try {
+              await refetchSlots()
+              console.log("Refetched slots after clearing - should be empty now")
+            } catch (error) {
+              console.error("Error refetching slots after clear:", error)
+            }
+          }, 500)
+        }
         
         // Clear balances in settings (keep other preferences)
         await fetch("/api/user-settings", {
@@ -956,12 +984,6 @@ ${slotListInfo}`
       alert("Error clearing hunt data. Please try again.")
       return
     }
-    
-    // Clear local state
-    setSlots([])
-    setStartBalance("")
-    setEndBalance("")
-    setNewSlot({ name: "", bet: "" })
     
     // Save empty balances to database
     const session = localStorage.getItem("huntmaster_session")
@@ -1089,6 +1111,14 @@ ${slotListInfo}`
           setTimeout(() => {
             setBalanceSavedState((prev) => ({ ...prev, start: false }))
           }, 2000)
+          // Clear editing state for this field after successful save
+          if (lastUserEditRef.current) {
+            delete lastUserEditRef.current.startBalance
+            // Only clear editing flag if end balance is also not being edited
+            if (!lastUserEditRef.current.endBalance) {
+              userEditingRef.current = false
+            }
+          }
         } else {
           previousSettingsRef.current.endBalance = endBalance || ""
           setBalanceSavedState({ ...balanceSavedState, end: true })
@@ -1096,6 +1126,14 @@ ${slotListInfo}`
           setTimeout(() => {
             setBalanceSavedState((prev) => ({ ...prev, end: false }))
           }, 2000)
+          // Clear editing state for this field after successful save
+          if (lastUserEditRef.current) {
+            delete lastUserEditRef.current.endBalance
+            // Only clear editing flag if start balance is also not being edited
+            if (!lastUserEditRef.current.startBalance) {
+              userEditingRef.current = false
+            }
+          }
         }
         console.log(`Balance saved successfully:`, balanceType, settingsToSave)
       } else {
@@ -1248,8 +1286,32 @@ ${slotListInfo}`
                   if (canEdit) {
                     const val = e.target.value
                     setStartBalance(val)
+                    // Mark that user is editing to prevent real-time updates from overwriting
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.startBalance = val
                     }
                   }}
+                onBlur={() => {
+                  // Stop tracking editing when user leaves the field
+                  // But keep the value in lastUserEditRef in case they come back
+                  if (lastUserEditRef.current && !lastUserEditRef.current.endBalance) {
+                    // Only clear editing flag if end balance is also not being edited
+                    userEditingRef.current = false
+                  }
+                }}
+                onFocus={() => {
+                  // Mark as editing when user focuses on the field
+                  if (canEdit) {
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.startBalance = startBalance
+                  }
+                }}
                   className={`flex-1 ${noSpinnerClass}`}
                 />
                 <Button
@@ -1276,8 +1338,32 @@ ${slotListInfo}`
                   if (canEdit) {
                     const val = e.target.value
                     setEndBalance(val === "" ? "" : val)
+                    // Mark that user is editing to prevent real-time updates from overwriting
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.endBalance = val === "" ? "" : val
                     }
                   }}
+                onBlur={() => {
+                  // Stop tracking editing when user leaves the field
+                  // But keep the value in lastUserEditRef in case they come back
+                  if (lastUserEditRef.current && !lastUserEditRef.current.startBalance) {
+                    // Only clear editing flag if start balance is also not being edited
+                    userEditingRef.current = false
+                  }
+                }}
+                onFocus={() => {
+                  // Mark as editing when user focuses on the field
+                  if (canEdit) {
+                    userEditingRef.current = true
+                    if (!lastUserEditRef.current) {
+                      lastUserEditRef.current = {}
+                    }
+                    lastUserEditRef.current.endBalance = endBalance
+                  }
+                }}
                   className={`flex-1 ${noSpinnerClass}`}
                 />
                 <Button
@@ -1751,6 +1837,9 @@ ${slotListInfo}`
               </div>
             )}
             <div className="flex flex-col space-y-2">
+              <Link href="/account">
+                <Button className="w-full">My Account</Button>
+              </Link>
               <Link href="/spider-edit">
                 <Button className="w-full">Customisable Overlay</Button>
               </Link>
