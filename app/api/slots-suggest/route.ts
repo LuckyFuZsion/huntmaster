@@ -110,6 +110,30 @@ export async function GET(request: Request) {
     const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
     const cached = getCached(cacheKey)
     if (cached) {
+      // Apply filtering to cached results too (in case cache was set before filtering was added)
+      const normalizedQuery = q.toLowerCase().trim();
+      if (cached.data && Array.isArray(cached.data)) {
+        const filteredCached = cached.data.filter((item: any) => {
+          if (!item.title) return false;
+          const normalizedTitle = item.title.toLowerCase().trim();
+          return normalizedTitle.includes(normalizedQuery);
+        });
+        
+        // Return filtered cached results
+        const filteredCachedResponse = {
+          ...cached,
+          data: filteredCached,
+          metadata: {
+            ...cached.metadata,
+            filteredResults: filteredCached.length,
+            totalBeforeFilter: cached.data.length,
+          }
+        };
+        
+        console.log(`✅ Cache hit for slots-suggest: "${q}" (Filtered: ${cached.data.length} → ${filteredCached.length})`)
+        return NextResponse.json(filteredCachedResponse)
+      }
+      
       console.log(`✅ Cache hit for slots-suggest: "${q}" (Cache stats: ${getApiStats().cacheHits} hits, ${getApiStats().totalApiCalls} calls)`)
       return NextResponse.json(cached)
     }
