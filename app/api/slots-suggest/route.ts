@@ -322,11 +322,23 @@ export async function GET(request: Request) {
     
     const deduped = Array.from(seen.values());
 
+    // Filter results to only include games where the title contains the search query
+    // This ensures we don't return irrelevant games that the APIs might match on provider/description
+    const normalizedQuery = q.toLowerCase().trim();
+    const filtered = deduped.filter((item) => {
+      if (!item.title) return false;
+      const normalizedTitle = item.title.toLowerCase().trim();
+      // Check if the title contains the search query (case-insensitive)
+      return normalizedTitle.includes(normalizedQuery);
+    });
+    
+    console.log(`🔍 Filtered results: ${deduped.length} → ${filtered.length} (query: "${q}")`);
+
     // Include minimal pagination hint from SlotsLaunch if present
     const pagination = slJson?.total_pages
       ? { total: slJson.total, total_pages: slJson.total_pages, page: Number(page || 1), limit }
       : undefined;
-    const payload = exhaustive ? deduped : deduped.slice(0, limit);
+    const payload = exhaustive ? filtered : filtered.slice(0, limit);
     
     // Include rate limit warnings in response if applicable
     const warnings: string[] = [];
@@ -339,6 +351,8 @@ export async function GET(request: Request) {
       usedFallback: usedSlotsLaunch,
       slotStreamersResults: ssItems.length,
       slotsLaunchResults: slGames.length,
+      filteredResults: filtered.length,
+      totalBeforeFilter: deduped.length,
     };
     
     const response = { 
