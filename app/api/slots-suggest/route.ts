@@ -169,30 +169,6 @@ export async function GET(request: Request) {
       console.warn(`Slot Streamers API error (${ssRes.status}) for query: "${q}"`);
     }
 
-    // FIX: If query is all lowercase and we got few results, also try capitalized version
-    // This catches games like "Mental" and "Mental 2" that might not be returned when searching "mental"
-    const isAllLowercase = q === q.toLowerCase() && q !== q.toUpperCase() && q.trim().length > 0;
-    const capitalizedQuery = q.charAt(0).toUpperCase() + q.slice(1).toLowerCase();
-    let additionalSSItems: any[] = [];
-    
-    if (isAllLowercase && ssItems.length < 10 && !ssRateLimited && capitalizedQuery !== q) {
-      console.log(`🔄 Also trying capitalized search: "${capitalizedQuery}" (original query "${q}" returned ${ssItems.length} results)`);
-      const suggestSSUrlCapitalized = new URL(`/api/slot-streamers/suggest-games`, origin);
-      suggestSSUrlCapitalized.searchParams.set("q", capitalizedQuery);
-      suggestSSUrlCapitalized.searchParams.set("limit", String(limit));
-      
-      try {
-        const ssResCapitalized = await fetch(suggestSSUrlCapitalized.toString(), { cache: "no-store" });
-        if (ssResCapitalized.ok) {
-          const ssJsonCapitalized = await ssResCapitalized.json();
-          additionalSSItems = Array.isArray(ssJsonCapitalized?.data) ? ssJsonCapitalized.data : [];
-          console.log(`✅ Capitalized search returned ${additionalSSItems.length} additional results`);
-        }
-      } catch (e) {
-        console.error("Error in capitalized search:", e);
-      }
-    }
-
     // SMART FALLBACK: Use SlotsLaunch to get additional results when needed
     // Cost optimization: Only call SlotsLaunch if:
     // 1. Slot Streamers has no results, OR
@@ -295,8 +271,8 @@ export async function GET(request: Request) {
     });
 
     // Combine results: Prioritize Slot Streamers, then add SlotsLaunch results
-    // Put Slot Streamers items first, then add additional capitalized search results, then add SlotsLaunch items that don't already exist
-    const combined = [...ssItems, ...additionalSSItems];
+    // Put Slot Streamers items first, then add SlotsLaunch items that don't already exist
+    const combined = [...ssItems];
     const seen = new Map<string, any>();
     
     // Add Slot Streamers items first (these take priority)
