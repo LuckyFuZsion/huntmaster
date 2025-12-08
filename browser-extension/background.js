@@ -81,6 +81,11 @@ async function checkGameExists(gameTitle, apiBaseUrl, sessionToken) {
     searchUrl.searchParams.set('limit', '20'); // Increase limit to get more results
     // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
     
+    // Pass session token for usage tracking (if available)
+    if (sessionToken) {
+      searchUrl.searchParams.set('session', sessionToken);
+    }
+    
     const response = await fetch(searchUrl.toString(), { cache: 'no-store' });
     const data = await response.json();
     
@@ -112,6 +117,11 @@ async function checkGameExists(gameTitle, apiBaseUrl, sessionToken) {
           fallbackUrl.searchParams.set('q', titleWithoutDash);
           fallbackUrl.searchParams.set('limit', '20');
           // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
+          
+          // Pass session token for usage tracking (if available)
+          if (sessionToken) {
+            fallbackUrl.searchParams.set('session', sessionToken);
+          }
           
           try {
             const fallbackResponse = await fetch(fallbackUrl.toString(), { cache: 'no-store' });

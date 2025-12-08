@@ -18,6 +18,7 @@ interface DashboardUserRow {
   status: UsageStatus
   updatedAt?: string | null
   lastResetAt?: string | null
+  planExpiresAt?: string | null
 }
 
 interface DashboardPayload {
@@ -117,6 +118,7 @@ function mapUsageToUser(
     status,
     updatedAt: usageRecord?.updatedAt ?? null,
     lastResetAt: usageRecord?.lastResetAt ?? null,
+    planExpiresAt: user.planExpiresAt ? (typeof user.planExpiresAt === 'string' ? user.planExpiresAt : user.planExpiresAt.toISOString()) : null,
   }
 }
 
@@ -222,6 +224,20 @@ export async function PATCH(request: Request) {
         return NextResponse.json({
           success: true,
           message: "Monthly usage reset",
+        })
+      }
+      case "set-plan-expires": {
+        if (!("planExpiresAt" in body)) {
+          throw new HttpError(400, "planExpiresAt is required for set-plan-expires")
+        }
+        const expiresValue = body.planExpiresAt === null || body.planExpiresAt === "" 
+          ? null 
+          : new Date(body.planExpiresAt).toISOString()
+
+        await supabaseAdmin.users.update(userId, { planExpiresAt: expiresValue })
+        return NextResponse.json({
+          success: true,
+          message: expiresValue === null ? "Plan expiration cleared" : "Plan expiration updated",
         })
       }
       default:

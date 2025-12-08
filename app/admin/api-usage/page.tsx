@@ -46,6 +46,7 @@ interface DashboardUserRow {
   status: UsageStatus
   updatedAt?: string | null
   lastResetAt?: string | null
+  planExpiresAt?: string | null
 }
 
 interface DashboardPayload {
@@ -93,6 +94,7 @@ export default function AdminApiUsagePage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<UsageStatus | "all">("all")
   const [limitDrafts, setLimitDrafts] = useState<Record<string, string>>({})
+  const [planExpiresDrafts, setPlanExpiresDrafts] = useState<Record<string, string>>({})
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(100)
@@ -112,11 +114,25 @@ export default function AdminApiUsagePage() {
       }
       const data: DashboardPayload = payload.data
       setUsageData(data)
-      const drafts: Record<string, string> = {}
+      const limitDrafts: Record<string, string> = {}
+      const expiresDrafts: Record<string, string> = {}
       data.users.forEach((user) => {
-        drafts[user.id] = user.monthlyLimit?.toString() ?? ""
+        limitDrafts[user.id] = user.monthlyLimit?.toString() ?? ""
+        // Format date for datetime-local input (YYYY-MM-DDTHH:mm)
+        if (user.planExpiresAt) {
+          const date = new Date(user.planExpiresAt)
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          const hours = String(date.getHours()).padStart(2, '0')
+          const minutes = String(date.getMinutes()).padStart(2, '0')
+          expiresDrafts[user.id] = `${year}-${month}-${day}T${hours}:${minutes}`
+        } else {
+          expiresDrafts[user.id] = ""
+        }
       })
-      setLimitDrafts(drafts)
+      setLimitDrafts(limitDrafts)
+      setPlanExpiresDrafts(expiresDrafts)
     } catch (error: any) {
       console.error("Failed to load admin usage dashboard:", error)
       setBanner({ type: "error", message: error?.message || "Unable to load usage data" })
@@ -217,6 +233,53 @@ export default function AdminApiUsagePage() {
     } finally {
       setActionLoading(null)
     }
+  }
+
+  const handlePlanExpiresSave = async (userId: string, expiresValue: string | null) => {
+    if (!sessionToken) return
+    setActionLoading(`plan-${userId}`)
+    try {
+      const response = await fetch("/api/admin/api-usage", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Huntmaster-Session": sessionToken,
+        },
+        body: JSON.stringify({
+          action: "set-plan-expires",
+          userId,
+          planExpiresAt: expiresValue,
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to update plan expiration")
+      }
+      setBanner({ type: "success", message: payload.message || "Plan expiration updated" })
+      await loadUsage(sessionToken)
+    } catch (error: any) {
+      console.error("Failed to set plan expiration:", error)
+      setBanner({ type: "error", message: error?.message || "Unable to update plan expiration" })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const formatTimeRemaining = (expiresAt: string | null | undefined): string => {
+    if (!expiresAt) return "—"
+    const now = new Date()
+    const expires = new Date(expiresAt)
+    const diff = expires.getTime() - now.getTime()
+    
+    if (diff < 0) return "Expired"
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+    
+    if (days > 0) return `${days}d ${hours}h`
+    if (hours > 0) return `${hours}h ${minutes}m`
+    return `${minutes}m`
   }
 
   const renderStatusBadge = (status: UsageStatus) => {
@@ -396,19 +459,21 @@ export default function AdminApiUsagePage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Usage</TableHead>
                       <TableHead>Limit</TableHead>
+                      <TableHead>Plan Expires</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-gray-400 py-10">
+                        <TableCell colSpan={6} className="text-center text-gray-400 py-10">
                           No users match your filters.
                         </TableCell>
                       </TableRow>
                     )}
                     {filteredUsers.map((user) => {
                       const draftValue = limitDrafts[user.id] ?? ""
+                      const expiresDraft = planExpiresDrafts[user.id] ?? ""
                       return (
                         <TableRow key={user.id} className="border-gray-800">
                           <TableCell>
@@ -492,6 +557,56 @@ export default function AdminApiUsagePage() {
                                   onClick={() => handleLimitSave(user.id, null)}
                                 >
                                   Unlimited
+                                </Button>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="w-[240px]">
+                            <div className="space-y-2">
+                              <div className="text-sm text-gray-300">
+                                {user.planExpiresAt ? (
+                                  <div className="flex flex-col gap-1">
+                                    <span>{new Date(user.planExpiresAt).toLocaleDateString()}</span>
+                                    <span className="text-xs text-gray-400">
+                                      {formatTimeRemaining(user.planExpiresAt)} remaining
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-500">No expiration</span>
+                                )}
+                              </div>
+                              <Input
+                                type="datetime-local"
+                                value={expiresDraft}
+                                onChange={(event) =>
+                                  setPlanExpiresDrafts((prev) => ({
+                                    ...prev,
+                                    [user.id]: event.target.value,
+                                  }))
+                                }
+                                className="bg-gray-900/70 border-gray-700 text-white text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={actionLoading === `plan-${user.id}`}
+                                  onClick={() =>
+                                    handlePlanExpiresSave(
+                                      user.id,
+                                      expiresDraft === "" ? null : expiresDraft,
+                                    )
+                                  }
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={actionLoading === `plan-${user.id}`}
+                                  onClick={() => handlePlanExpiresSave(user.id, null)}
+                                >
+                                  Clear
                                 </Button>
                               </div>
                             </div>

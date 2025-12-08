@@ -52,6 +52,7 @@ function normalizeUser(user: any): User {
     huntmasterAdmin: user.huntmasterAdmin ?? user.huntmaster_admin ?? false,
     createdAt: user.createdAt ?? user.created_at ?? new Date(),
     apiMonthlyLimit: user.apiMonthlyLimit ?? user.api_monthly_limit ?? null,
+    planExpiresAt: user.planExpiresAt ?? user.plan_expires_at ?? null,
   }
 }
 
@@ -68,6 +69,7 @@ export interface User {
   huntmasterAdmin?: boolean // Admin flag for HuntMaster (separate from main app admin)
   createdAt: Date | string
   apiMonthlyLimit?: number | null
+  planExpiresAt?: Date | string | null // When the user's plan expires
 }
 
 export interface Slot {
@@ -312,6 +314,7 @@ export const supabaseAdmin = {
         if (updateData.password !== undefined) snakeCaseData.password = updateData.password
         if (updateData.username !== undefined) snakeCaseData.username = updateData.username
         if (updateData.apiMonthlyLimit !== undefined) snakeCaseData.api_monthly_limit = updateData.apiMonthlyLimit
+        if (updateData.planExpiresAt !== undefined) snakeCaseData.plan_expires_at = updateData.planExpiresAt
         
         const { error: snakeError } = await getSupabaseAdminClient()
           .from('users')
