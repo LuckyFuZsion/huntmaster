@@ -147,7 +147,7 @@ export async function GET(request: NextRequest) {
     const email = userData.email || undefined
 
     // Prepare update data that might be needed
-    const updateData: { username?: string; discordId: string; email?: string; huntmaster?: boolean } = { discordId: userData.id }
+    const updateData: { username?: string; discordId: string; email?: string; huntmaster?: boolean; isActive?: boolean } = { discordId: userData.id }
     if (email) {
       updateData.email = email
     }
@@ -212,6 +212,17 @@ export async function GET(request: NextRequest) {
       if (email && !user.email) {
         updateData.email = email
         needsUpdate = true
+      }
+      
+      // Restore authorization for existing Discord users
+      // If they were previously authorized (or are existing users), grant access
+      if (!user.huntmaster || !user.isActive) {
+        // For existing Discord users, grant authorization automatically
+        // This ensures existing authorized users don't lose access
+        updateData.huntmaster = true
+        updateData.isActive = true
+        needsUpdate = true
+        console.log(`Restoring authorization for existing Discord user: ${user.username}`)
       }
       
       if (needsUpdate) {

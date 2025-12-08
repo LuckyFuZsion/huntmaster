@@ -52,3 +52,8 @@ echo "  1. Upload $OUTPUT_ZIP to Chrome Web Store"
 echo "  2. See CHROME_STORE_SUBMISSION.md for complete guide"
 echo ""
 
+
+
+
+
+

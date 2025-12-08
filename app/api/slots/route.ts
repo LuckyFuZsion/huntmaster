@@ -128,8 +128,10 @@ export async function POST(request: Request) {
                 winAmount: Number(newWin),
                 xWin,
               }
-              console.log("Creating userWin with data:", JSON.stringify(winRecord))
-              const created = await supabaseAdmin.userWins.create(winRecord)
+              // Only include optional fields if they have values (Firestore doesn't allow undefined)
+              // gameSlug and provider can be added later if needed
+              console.log("Creating or updating best userWin with data:", JSON.stringify(winRecord))
+              const created = await supabaseAdmin.userWins.createOrUpdateBest(winRecord)
               console.log("✅ Successfully recorded user win. ID:", created.id, "Game:", singleSlot.name, "Win:", newWin, "X:", xWin)
             } catch (e: any) {
               console.error("❌ Failed to record user win:", e)
@@ -176,7 +178,7 @@ export async function POST(request: Request) {
             // Create win record in background (non-blocking) to reduce function duration
             Promise.resolve().then(async () => {
               try {
-                await supabaseAdmin.userWins.create({
+                await supabaseAdmin.userWins.createOrUpdateBest({
                   userId,
                   gameTitle: gameTitleTrimmed,
                   bet: bet,
@@ -279,10 +281,11 @@ export async function POST(request: Request) {
       }
       
       // Create wins in batch (non-blocking - don't fail if this errors)
+      // Use createOrUpdateBest to only save biggest win per game (cost optimization)
       if (winsToCreate.length > 0) {
         Promise.all(
           winsToCreate.map(win => 
-            supabaseAdmin.userWins.create(win).catch(err => {
+            supabaseAdmin.userWins.createOrUpdateBest(win).catch(err => {
               console.error("Failed to record user win:", err)
             })
           )

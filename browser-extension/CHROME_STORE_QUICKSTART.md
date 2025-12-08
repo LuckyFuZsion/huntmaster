@@ -115,3 +115,8 @@ A: Yes! Once published, updates are automatic when you publish new versions.
 
 For detailed instructions, see `CHROME_STORE_SUBMISSION.md`.
 
+
+
+
+
+

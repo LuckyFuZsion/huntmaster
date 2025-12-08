@@ -102,3 +102,8 @@ This extension complies with:
 
 **Note**: Replace `[DATE]` and `[YOUR_EMAIL_HERE]` with actual values before submitting to Chrome Web Store.
 
+
+
+
+
+

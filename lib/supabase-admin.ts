@@ -121,6 +121,7 @@ export interface UserSettings {
 export interface UserWin {
   id: string
   userId: string
+  username?: string
   gameTitle: string
   gameSlug?: string
   provider?: string
@@ -608,6 +609,138 @@ export const supabaseAdmin = {
         return created;
       } catch (err) {
         console.error('❌ Error in userWins.create:', err);
+        throw err;
+      }
+    },
+    
+    async createOrUpdateBest(win: Omit<UserWin, 'id' | 'createdAt'>): Promise<UserWin> {
+      try {
+        console.log('Attempting to create or update best userWin:', {
+          userId: win.userId,
+          gameTitle: win.gameTitle,
+          bet: win.bet,
+          winAmount: win.winAmount,
+          xWin: win.xWin,
+          provider: win.provider
+        });
+        
+        // Fetch username from userId if not provided
+        let username = win.username;
+        if (!username && win.userId) {
+          try {
+            const user = await supabaseAdmin.users.findOne(win.userId);
+            if (user) {
+              username = user.username;
+            }
+          } catch (userError) {
+            console.warn('Could not fetch username for userId:', win.userId, userError);
+            // Continue without username - it's optional
+          }
+        }
+        
+        // Check if a record already exists for this user + game
+        const { data: existingData, error: findError } = await getSupabaseAdminClient()
+          .from('userWins')
+          .select('*')
+          .eq('userId', win.userId)
+          .eq('gameTitle', win.gameTitle)
+          .limit(1)
+          .maybeSingle()
+        
+        if (findError) {
+          console.error('❌ Error finding existing userWin:', findError);
+          throw findError;
+        }
+        
+        // If record exists, check if new win is higher
+        if (existingData) {
+          const existingWinAmount = Number(existingData.winAmount);
+          const newWinAmount = Number(win.winAmount);
+          
+          if (newWinAmount > existingWinAmount) {
+            // Update with new higher win
+            console.log(`📈 Updating existing win: ${existingWinAmount} -> ${newWinAmount}`);
+            const updateData: any = {
+              bet: win.bet,
+              winAmount: win.winAmount,
+              xWin: win.xWin,
+              provider: win.provider || existingData.provider,
+              gameSlug: win.gameSlug || existingData.gameSlug,
+            };
+            
+            // Update username if we have it
+            if (username) {
+              updateData.username = username;
+            }
+            
+            const { data: updatedData, error: updateError } = await getSupabaseAdminClient()
+              .from('userWins')
+              .update(updateData)
+              .eq('id', existingData.id)
+              .select()
+              .single()
+            
+            if (updateError) {
+              console.error('❌ Supabase update error:', updateError);
+              throw updateError;
+            }
+            
+            console.log('✅ UserWin updated successfully:', {
+              id: updatedData.id,
+              userId: updatedData.userId,
+              username: updatedData.username,
+              gameTitle: updatedData.gameTitle,
+              winAmount: updatedData.winAmount
+            });
+            
+            return updatedData;
+          } else {
+            // New win is not higher, return existing record
+            console.log(`⏭️  Skipping update - existing win (${existingWinAmount}) is higher than new win (${newWinAmount})`);
+            return existingData;
+          }
+        } else {
+          // No existing record, create new one
+          console.log('✨ Creating new userWin record');
+          const insertData: any = {
+            ...win,
+            createdAt: new Date().toISOString(),
+          };
+          
+          // Add username if we have it
+          if (username) {
+            insertData.username = username;
+          }
+          
+          const { data: newData, error: insertError } = await getSupabaseAdminClient()
+            .from('userWins')
+            .insert(insertData)
+            .select()
+            .single()
+          
+          if (insertError) {
+            console.error('❌ Supabase insert error:', {
+              message: insertError.message,
+              code: insertError.code,
+              details: insertError.details,
+              hint: insertError.hint,
+              winData: win
+            });
+            throw insertError;
+          }
+          
+          console.log('✅ UserWin created successfully:', {
+            id: newData.id,
+            userId: newData.userId,
+            username: newData.username,
+            gameTitle: newData.gameTitle,
+            winAmount: newData.winAmount
+          });
+          
+          return newData;
+        }
+      } catch (err) {
+        console.error('❌ Error in userWins.createOrUpdateBest:', err);
         throw err;
       }
     },

@@ -155,3 +155,8 @@ Then point `update_url` to: `https://huntmaster.vercel.app/api/extension-update`
 For a small user base: **Custom update server** is fine
 For public distribution: **Chrome Web Store** is better UX
 
+
+
+
+
+

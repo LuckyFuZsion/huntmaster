@@ -155,3 +155,8 @@ The extension has one clear purpose: to automatically detect casino games being 
 
 **Ready to submit?** See `CHROME_STORE_SUBMISSION.md` for complete step-by-step instructions!
 
+
+
+
+
+

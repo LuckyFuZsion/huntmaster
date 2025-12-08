@@ -107,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_userSettings_userId ON "userSettings"("userId");
 CREATE TABLE IF NOT EXISTS "userWins" (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "userId" TEXT NOT NULL,
+  username TEXT,
   "gameTitle" TEXT NOT NULL,
   "gameSlug" TEXT,
   provider TEXT,
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS "userWins" (
 );
 
 CREATE INDEX IF NOT EXISTS idx_userWins_userId ON "userWins"("userId");
+CREATE INDEX IF NOT EXISTS idx_userWins_username ON "userWins"(username);
 CREATE INDEX IF NOT EXISTS idx_userWins_gameTitle ON "userWins"("gameTitle");
 
 -- ============================================================================

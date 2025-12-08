@@ -59,9 +59,9 @@ export async function POST(request: Request) {
 
     let created;
     try {
-      console.log('📝 Attempting to save win (biggest win only):', winRecord);
-      created = await supabaseAdmin.userWins.create(winRecord);
-      console.log('✅ Win record created successfully:', {
+      console.log('📝 Attempting to create or update best win record with:', winRecord);
+      created = await supabaseAdmin.userWins.createOrUpdateBest(winRecord);
+      console.log('✅ Win record created/updated successfully:', {
         id: created.id,
         userId,
         gameTitle: created.gameTitle,
