@@ -31,7 +31,7 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
 
   const queryUrl = useMemo(() => {
     if (!value || value.trim().length < minChars) return null;
-    const p = new URLSearchParams({ q: value.trim(), limit: "8" });
+    const p = new URLSearchParams({ q: value.trim(), limit: "50" }); // Increased from 8 to 50 for better coverage
     return `/api/slots-suggest?${p.toString()}`;
   }, [value, minChars]);
 

@@ -167,7 +167,12 @@ export async function GET(request: Request) {
       console.warn(`Slot Streamers API error (${ssRes.status}) for query: "${q}"`);
     }
 
-    // FALLBACK: Only use SlotsLaunch if Slot Streamers has no results or is rate limited
+    // SMART FALLBACK: Use SlotsLaunch to get additional results when needed
+    // Cost optimization: Only call SlotsLaunch if:
+    // 1. Slot Streamers has no results, OR
+    // 2. Slot Streamers has fewer than 5 results (likely incomplete), OR
+    // 3. Slot Streamers is rate limited
+    // This balances coverage with cost - most searches will only use 1 API call
     // OPTIMIZATION: Never use exhaustive mode - it's too expensive (fetches all pages = 10-20+ API calls)
     // Only fetch first page of results to keep costs low
     let slJson: any = { games: [] };
@@ -175,7 +180,11 @@ export async function GET(request: Request) {
     let slRateLimited = false;
     let usedSlotsLaunch = false;
 
-    if (ssItems.length === 0 || ssRateLimited) {
+    // Only call SlotsLaunch if we need more results (cost optimization)
+    const MIN_RESULTS_THRESHOLD = 5; // If Slot Streamers has < 5 results, also check SlotsLaunch
+    const shouldUseSlotsLaunch = ssItems.length === 0 || ssItems.length < MIN_RESULTS_THRESHOLD || ssRateLimited;
+
+    if (shouldUseSlotsLaunch) {
       usedSlotsLaunch = true;
       const slotsLaunchUrl = new URL(`/api/slotslaunch`, origin);
       slotsLaunchUrl.searchParams.set("search", q);
@@ -185,7 +194,8 @@ export async function GET(request: Request) {
       // Only fetch first page to keep costs low
 
       slotsLaunchCallCount++
-      console.log(`🔄 Falling back to SlotsLaunch API for: "${q}" (Call #${slotsLaunchCallCount}, first page only to reduce costs)`);
+      const reason = ssRateLimited ? "rate limited" : (ssItems.length === 0 ? "no results" : `only ${ssItems.length} results`);
+      console.log(`🔄 Checking SlotsLaunch API for: "${q}" (Call #${slotsLaunchCallCount}, because Slot Streamers ${reason})`);
       const slRes = await fetch(slotsLaunchUrl.toString(), { cache: "no-store" });
       
       slRateLimited = slRes.status === 429;
@@ -198,7 +208,7 @@ export async function GET(request: Request) {
         try {
           slJson = await slRes.json();
           slGames = Array.isArray(slJson?.games) ? slJson.games : [];
-          console.log(`✅ SlotsLaunch returned ${slGames.length} results`);
+          console.log(`✅ SlotsLaunch returned ${slGames.length} results (Slot Streamers had ${ssItems.length} results)`);
         } catch (e) {
           console.error("Error parsing SlotsLaunch response:", e);
         }
@@ -206,7 +216,7 @@ export async function GET(request: Request) {
         console.warn(`SlotsLaunch API error (${slRes.status}) for query: "${q}"`);
       }
     } else {
-      console.log(`✅ Using Slot Streamers results only (${ssItems.length} results found)`);
+      console.log(`✅ Using Slot Streamers results only (${ssItems.length} results found, >= ${MIN_RESULTS_THRESHOLD} threshold)`);
     }
 
     // Map SlotsLaunch games to same format (only if we used SlotsLaunch)
