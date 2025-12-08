@@ -169,6 +169,29 @@ export async function GET(request: Request) {
       console.warn(`Slot Streamers API error (${ssRes.status}) for query: "${q}"`);
     }
 
+    // FIX: If query is all lowercase and we got few results, also try capitalized version
+    // This catches games like "Mental" and "Mental 2" that might not be returned when searching "mental"
+    const isAllLowercase = q === q.toLowerCase() && q !== q.toUpperCase() && q.trim().length > 0;
+    const capitalizedQuery = q.charAt(0).toUpperCase() + q.slice(1).toLowerCase();
+    let additionalSSItems: any[] = [];
+    
+    if (isAllLowercase && ssItems.length < 10 && !ssRateLimited && capitalizedQuery !== q) {
+      console.log(`🔄 Also trying capitalized search: "${capitalizedQuery}" (original query "${q}" returned ${ssItems.length} results)`);
+      const suggestSSUrlCapitalized = new URL(`/api/slot-streamers/suggest-games`, origin);
+      suggestSSUrlCapitalized.searchParams.set("q", capitalizedQuery);
+      suggestSSUrlCapitalized.searchParams.set("limit", String(limit));
+      
+      try {
+        const ssResCapitalized = await fetch(suggestSSUrlCapitalized.toString(), { cache: "no-store" });
+        if (ssResCapitalized.ok) {
+          const ssJsonCapitalized = await ssResCapitalized.json();
+          additionalSSItems = Array.isArray(ssJsonCapitalized?.data) ? ssJsonCapitalized.data : [];
+          console.log(`✅ Capitalized search returned ${additionalSSItems.length} additional results`);
+        }
+      } catch (e) {
+        console.error("Error in capitalized search:", e);
+      }
+    }
 
     // SMART FALLBACK: Use SlotsLaunch to get additional results when needed
     // Cost optimization: Only call SlotsLaunch if:
@@ -272,8 +295,8 @@ export async function GET(request: Request) {
     });
 
     // Combine results: Prioritize Slot Streamers, then add SlotsLaunch results
-    // Put Slot Streamers items first, then add SlotsLaunch items that don't already exist
-    const combined = [...ssItems];
+    // Put Slot Streamers items first, then add additional capitalized search results, then add SlotsLaunch items that don't already exist
+    const combined = [...ssItems, ...additionalSSItems];
     const seen = new Map<string, any>();
     
     // Add Slot Streamers items first (these take priority)
@@ -325,12 +348,17 @@ export async function GET(request: Request) {
     
     const deduped = Array.from(seen.values());
 
-    // For browser extension: trust API results completely, no filtering
-    // For web app: minimal filtering - just ensure results have titles
-    // The API handles all matching logic, we just return what it gives us
-    const filtered = deduped.filter((item) => item.title); // Just ensure title exists
+    // Filter results to only include games where the title contains the search query
+    // The API may match on provider/description, but we only want games with the query in the title
+    const normalizedQuery = q.toLowerCase().trim();
+    const filtered = deduped.filter((item) => {
+      if (!item.title) return false;
+      const normalizedTitle = item.title.toLowerCase().trim();
+      // Check if the title contains the search query (case-insensitive)
+      return normalizedTitle.includes(normalizedQuery);
+    });
     
-    console.log(`🔍 Results: ${deduped.length} total, ${filtered.length} after filtering (query: "${q}", browserExtension: ${isBrowserExtension})`);
+    console.log(`🔍 Filtered results: ${deduped.length} → ${filtered.length} (query: "${q}")`);
 
     // Include minimal pagination hint from SlotsLaunch if present
     const pagination = slJson?.total_pages
