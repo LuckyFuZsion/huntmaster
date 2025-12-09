@@ -336,7 +336,7 @@ async function updateCurrentGame(gameTitle, provider) {
       body: JSON.stringify({
         session: sessionToken,
         gameTitle: gameTitle.trim(),
-        // Provider removed - only updating game names
+        provider: provider?.trim() || undefined,
       }),
     });
 
