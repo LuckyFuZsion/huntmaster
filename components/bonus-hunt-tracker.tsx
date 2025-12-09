@@ -16,10 +16,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Clipboard, FileIcon, Plus, Minus, Info, LogOut, RefreshCw, Check } from "lucide-react"
+import { Clipboard, FileIcon, Plus, Minus, Info, LogOut, RefreshCw, Check, BookOpen, Settings, Monitor, Gamepad2, Link2, Copy, Zap, ExternalLink } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Image from "next/image"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { decrypt } from "@/lib/protection"
 import { useRouter } from "next/navigation"
 // Add the import for VersionHistory
@@ -27,6 +29,7 @@ import { VersionHistory } from "@/components/version-history"
 import SlotNameAutocomplete from "@/components/SlotNameAutocomplete"
 import { useSupabaseSlots } from "@/lib/hooks/useSupabaseSlots"
 import { useSupabaseUserSettings } from "@/lib/hooks/useSupabaseUserSettings"
+import { InstructionsContent } from "@/components/instructions-content"
 
 interface Slot {
   id: string
@@ -440,8 +443,17 @@ export function BonusHuntTracker() {
   // Save slots to database whenever they change (but not on initial load)
   // Use refs to prevent loops and debounce saves
   const savingRef = useRef(false)
-  const lastSavedSlotsRef = useRef<string>("") // JSON string of last saved slots
+  const lastSavedSlotsRef = useRef<string>("") // JSON string of last saved slots (normalized, no IDs)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Helper function to normalize slots for comparison (excludes IDs since they change on save)
+  const normalizeSlotsForComparison = useCallback((slots: Slot[]) => {
+    return JSON.stringify(
+      slots
+        .map(s => ({ name: s.name, bet: s.bet, win: s.win }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
+  }, [])
   
   useEffect(() => {
     if (!initialLoadComplete) {
@@ -460,8 +472,9 @@ export function BonusHuntTracker() {
       return true
     })
     
-    // Only save if slots actually changed (by comparing JSON)
-    const currentSlotsJson = JSON.stringify(uniqueSlots.map(s => ({ id: s.id, name: s.name, bet: s.bet, win: s.win })))
+    // Only save if slots actually changed (by comparing JSON, excluding IDs since they change on save)
+    // Compare by name, bet, win only - IDs will be different after save but data is the same
+    const currentSlotsJson = normalizeSlotsForComparison(uniqueSlots)
     if (currentSlotsJson === lastSavedSlotsRef.current) {
       return // No changes, skip save
     }
@@ -514,17 +527,21 @@ export function BonusHuntTracker() {
               return
             }
             
-            // Update last saved reference
+            // Update last saved reference (compare by name/bet/win, not IDs)
             if (data.success && data.slots) {
-              lastSavedSlotsRef.current = JSON.stringify(data.slots.map((s: any) => ({ id: s.id, name: s.name, bet: s.bet, win: s.win })))
+              // Update last saved reference using normalized comparison (no IDs)
+              const savedSlotsData = data.slots.map((s: any) => ({ name: s.name, bet: s.bet, win: s.win }))
+              lastSavedSlotsRef.current = normalizeSlotsForComparison(savedSlotsData as Slot[])
               
               // If we saved an empty array (clearing all slots), ensure state is empty
               if (data.slots.length === 0 && uniqueSlots.length === 0) {
                 setSlots([])
               } else {
-                // Only update state if there are actual differences (temporary IDs or count change)
-                const hasTempIds = uniqueSlots.some(slot => slot.id.length <= 15)
+                // Only update state if we have temporary IDs (need real IDs from server)
+                // Don't update if only IDs changed - that causes infinite loops
+                const hasTempIds = uniqueSlots.some(slot => slot.id.length <= 15 || !slot.id.includes('-'))
                 const slotCountChanged = data.slots.length !== uniqueSlots.length
+                
                 if (hasTempIds || slotCountChanged) {
                   // Deduplicate before setting state
                   const seen = new Set<string>()
@@ -538,7 +555,16 @@ export function BonusHuntTracker() {
                     bet: slot.bet,
                     win: slot.win,
                   }))
-                  setSlots(deduplicated)
+                  
+                  // Only update state if we have temp IDs (need real IDs) or count changed
+                  // Don't update just because IDs are different - compare actual data
+                  const currentDataKey = normalizeSlotsForComparison(slots)
+                  const newDataKey = normalizeSlotsForComparison(deduplicated)
+                  
+                  // Only update if data actually changed OR we need real IDs
+                  if (currentDataKey !== newDataKey || hasTempIds) {
+                    setSlots(deduplicated)
+                  }
                 }
               }
             }
@@ -1441,7 +1467,7 @@ ${slotListInfo}`
                   <div className="grid grid-cols-2 gap-2">
                     {["obs", "obs2", "obs3", "obs4", "obs5"].map((source) => (
                       <div key={source} className="flex items-center space-x-2">
-                        <label htmlFor={`${source}-size`} className="w-16 text-xs font-medium text-gray-700">
+                        <label htmlFor={`${source}-size`} className="w-16 text-xs font-medium text-gray-700 dark:text-gray-300">
                           {source.toUpperCase()}:
                         </label>
                         <Select
@@ -2131,171 +2157,26 @@ ${slotListInfo}`
         </DialogContent>
       </Dialog>
       <Dialog open={isInstructionsDialogOpen} onOpenChange={(open) => setIsInstructionsDialogOpen(open)}>
-        <DialogContent className="max-w-4xl" aria-describedby="instructions-dialog-description">
+        <DialogContent className="max-w-5xl max-h-[90vh]" aria-describedby="instructions-dialog-description">
           <DialogHeader>
-            <DialogTitle>How to Use the Bonus Hunt Software</DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-2xl flex items-center gap-2">
+                <BookOpen className="w-6 h-6" />
+                HuntMaster 2.0 - Complete User Guide
+              </DialogTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open('/instructions', '_blank')}
+                className="flex items-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open in New Tab
+              </Button>
+            </div>
           </DialogHeader>
-          <div id="instructions-dialog-description" className="space-y-4 max-h-[60vh] overflow-y-auto">
-            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
-              <div className="font-bold">⚠️ Important Warning</div>
-              <p>
-                Always enter your hunt information using the OBS dock panel, not through a web browser. Information
-                entered in a browser will not sync with your OBS browser sources.
-              </p>
-            </div>
-            <p>Welcome to the Bonus Hunt Tracker! Here's how to use the software:</p>
-            <ol className="list-decimal list-inside space-y-2">
-              <li className="mb-4">
-                <strong>Set up the OBS Custom Dock (Important First Step):</strong>
-                <ul className="list-disc ml-6 mt-2 space-y-1 text-sm text-muted-foreground">
-                  <li>In OBS Studio, go to View → Docks → Custom Browser Docks</li>
-                  <li>Enter "Huntmaster" as the dock name</li>
-                  <li>Add the URL: https://huntmaster.vercel.app/</li>
-                  <li>Position the dock vertically on the left or right side of your OBS window</li>
-                  <li>Note: For best compatibility, use OBS Studio rather than Streamlabs OBS</li>
-                </ul>
-              </li>
-              <li>Enter your starting balance and ending balance in the input fields at the top.</li>
-              <li>Add slots by entering the slot name and bet size, then click "Add Slot".</li>
-              <li>Use the "View Slotlist" button to see and edit your added slots.</li>
-              <li>Customize OBS settings using the "Customise OBS" menu.</li>
-              <li>Access widgets using the "Show Widgets Menu" button.</li>
-              <li>
-                <strong>Resizing OBS Sources:</strong>
-                <ul className="list-disc ml-6 mt-2 space-y-1 text-sm text-muted-foreground">
-                  <li>To resize an OBS source, use the size dropdown in the Customise OBS menu</li>
-                  <li>After changing the size, click the clipboard icon next to the OBS button</li>
-                  <li>In OBS Studio, right-click the existing browser source and select "Properties"</li>
-                  <li>Replace the URL with the newly copied link that includes the updated size parameter</li>
-                  <li>
-                    Set the "Height" property in OBS to match your selected size (e.g., if you selected 600px, set
-                    height to 600)
-                  </li>
-                  <li>
-                    The "Width" property should remain at the default for that source:
-                    <ul className="list-disc ml-6 mt-2 space-y-1">
-                      <li>OBS 1: 600px width</li>
-                      <li>OBS 2: 400px width</li>
-                      <li>OBS 3: 600px width</li>
-                      <li>OBS 4: 520px width</li>
-                      <li>OBS 5: 700px width</li>
-                    </ul>
-                  </li>
-                  <li>Click "OK" to apply the changes</li>
-                </ul>
-              </li>
-              <li>
-                <strong>Time & Date Widgets:</strong>
-                <ul className="list-disc ml-6 mt-2 space-y-1 text-sm text-muted-foreground">
-                  <li>
-                    The Time & Date widget displays the current time and date with a clean, transparent background
-                  </li>
-                  <li>The Time & Date Pro widget offers customization options via URL parameters:</li>
-                  <li className="ml-4">
-                    Format: ?format=24 (for 24-hour time) or ?format=12 (for 12-hour time with AM/PM)
-                  </li>
-                  <li className="ml-4">Seconds: ?seconds=false to hide seconds</li>
-                  <li className="ml-4">Date: ?date=false to hide the date</li>
-                  <li className="ml-4">Theme: ?theme=neon, ?theme=sunset, ?theme=forest, or ?theme=purple</li>
-                  <li className="ml-4">Size: ?size=small, ?size=medium, ?size=large, or ?size=xlarge</li>
-                  <li className="ml-4">Example: /widgets/time-date-advanced?theme=neon&format=24&size=large</li>
-                </ul>
-              </li>
-              <li>Use the "Collect Bonuses" button to enter win amounts for each bonus round.</li>
-              <li>Copy hunt details using the clipboard button at the bottom.</li>
-            </ol>
-            <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4">
-              <div className="font-bold">📌 Personalized URLs</div>
-              <p className="mt-1">
-                Each user has their own personalized overlay and widget URLs. The URLs below are specifically for{" "}
-                <strong>{currentUsername || "your account"}</strong>. Each user's data is isolated, so your overlays will only show your hunt information.
-              </p>
-            </div>
-            <h3 className="text-lg font-semibold mt-4">Widget and Browser Source Links</h3>
-            <p>Use these personalized links to add widgets and browser sources to your stream:</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/main-obs-browser-source.png-2RlwuBNGOkYET3pIouxJq3YHoSPoZq.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-2?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-2.png-k64OYIEnlEcLRCLPPk2CfJ9OcJruFQ.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-3?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-3.png-9TCrvW2SagQQVoQ9FYu0ORCvoto50o.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-4?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-4.png-FI75hlCjnnIRoPvTu7gpfJIUwob6DM.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-5?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-7?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/obs-8?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/spider?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/obs-browser-source-5.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/progress-bar?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/progress-bar-widget.png-NDrWkJkNn45TPvyo7WZEQvoOcwT9qi.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/top-wins?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/top-wins-widget.png-AxXX4ovkJqoMC4sKZpwRxXTMeFBTJ7.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/hunt-stats?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/hunt-stats-widget.png-m4l9PjOT411kJqW9j52rQHMZUyoFZ9.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/next-bonus?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/start-balance?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/time-date?user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/time-date-advanced?theme=neon&user=${currentUsername}`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=extension`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-                title="Now Playing (Extension)"
-              />
-              <WidgetItem
-                url={`http://huntmaster.vercel.app/widgets/now-playing?user=${currentUsername}&source=hunt`}
-                imageSrc="https://gxciioabwrkahdfe.public.blob.vercel-storage.com/images/start-balance-widget.png-PSIKZvFILkH6gQJkeLb4YPtjtimYQ5.png"
-                title="Now Playing (Bonus Hunt)"
-              />
-            </div>
-            <p className="mt-4">
-              <strong>Important:</strong> These URLs are personalized for your account ({currentUsername || "your username"}). 
-              To use these in OBS Studio, add a Browser Source and paste the appropriate link. Each overlay and widget will display only your hunt data.
-            </p>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              <strong>Customization Note:</strong> The Spider overlay is highly customizable! Visit{" "}
-              <Link href="/spider-edit" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline dark:text-blue-400">
-                /spider-edit
-              </Link>{" "}
-              to customize colors, fonts, header text, border width, and more. Your customization settings will be saved to localStorage and applied to your Spider overlay.
-            </p>
+          <div id="instructions-dialog-description" className="space-y-4 overflow-y-auto pr-2" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+            <InstructionsContent currentUsername={currentUsername} />
           </div>
           <DialogFooter>
             <Button onClick={() => setIsInstructionsDialogOpen(false)}>Close</Button>
@@ -2339,12 +2220,82 @@ ${slotListInfo}`
                 <br />
                 <div className="mt-2 space-y-1">
                   {typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (
-                    <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs block">
+                    <code className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 rounded text-xs block">
                       http://localhost:3000
                     </code>
                   ) : (
                     <>
-                      <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs block">
+                      <code className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 rounded text-xs block">
+                        https://huntmaster.vercel.app
+                      </code>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        (For local development, use: http://localhost:3000)
+                      </p>
+                    </>
+                  )}
+                </div>
+              </li>
+              <li>
+                <strong>Click "Save Configuration"</strong> - Your extension is now ready to use!
+              </li>
+            </ol>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm">
+              <strong className="text-blue-800 dark:text-blue-200">💡 Tip:</strong>
+              <p className="text-blue-700 dark:text-blue-300 mt-1">
+                Once configured, the extension will automatically detect games from casino sites and update your Now Playing widget.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setIsExtensionTokenDialogOpen(false)} variant="default">
+              Got it!
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isClipboardDialogOpen} onOpenChange={setIsClipboardDialogOpen}>
+        <DialogContent aria-describedby="clipboard-dialog-description">
+          <DialogHeader>
+            <DialogTitle>Clipboard</DialogTitle>
+            <DialogDescription id="clipboard-dialog-description">{clipboardDialogContent}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setIsClipboardDialogOpen(false)} variant="default">
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isExtensionTokenDialogOpen} onOpenChange={setIsExtensionTokenDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Session Token Copied! ✓</DialogTitle>
+            <DialogDescription>
+              Your session token has been copied to your clipboard. Follow these steps to configure the browser extension:
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <ol className="list-decimal list-inside space-y-3 text-sm text-gray-700 dark:text-gray-300">
+              <li>
+                <strong>Open the browser extension</strong> - Click the HuntMaster Game Detector icon in your browser toolbar
+              </li>
+              <li>
+                <strong>Scroll to "API Configuration"</strong> section at the bottom of the popup
+              </li>
+              <li>
+                <strong>Paste the token</strong> - Click in the "Session Token" field and paste (Ctrl+V / Cmd+V)
+              </li>
+              <li>
+                <strong>Set API URL</strong> - Make sure the API Base URL is set to:
+                <br />
+                <div className="mt-2 space-y-1">
+                  {typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (
+                    <code className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 rounded text-xs block">
+                      http://localhost:3000
+                    </code>
+                  ) : (
+                    <>
+                      <code className="bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 rounded text-xs block">
                         https://huntmaster.vercel.app
                       </code>
                       <p className="text-xs text-gray-500 dark:text-gray-400">

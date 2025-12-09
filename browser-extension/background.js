@@ -272,6 +272,25 @@ async function autoUpdateCurrentGame(gameInfo) {
 
 // Listen for messages from content script and HuntMaster pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Check if extension is locked to a specific tab
+  chrome.storage.local.get(['lockedTabId'], (result) => {
+    const lockedTabId = result.lockedTabId;
+    
+    // If locked and this message is not from the locked tab, ignore it
+    if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
+      console.log('[HuntMaster Extension] Ignoring message from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
+      return false; // Ignore message
+    }
+    
+    // Process message normally
+    handleMessage(message, sender, sendResponse, lockedTabId);
+  });
+  
+  return true; // Keep channel open for async response
+});
+
+// Handle messages (extracted for cleaner code)
+function handleMessage(message, sender, sendResponse, lockedTabId) {
   if (message.type === 'HUNTMASTER_SESSION_TOKEN' && message.token) {
     // Automatically save session token when detected on HuntMaster pages
     chrome.storage.local.set({
@@ -281,7 +300,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, () => {
       console.log('[HuntMaster Extension] Session token automatically detected and saved from:', message.url);
     });
-    return false; // No async response needed
+    sendResponse({ success: true });
+    return;
   }
   
   if (message.type === 'GAME_DETECTED') {
@@ -303,18 +323,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     sendResponse({ success: true });
-    return true; // Keep channel open for async response
+    return;
   }
   
   if (message.type === 'GET_LAST_GAME') {
     chrome.storage.local.get(['lastDetectedGame', 'lastDetectedTime'], (result) => {
       sendResponse(result);
     });
-    return true; // Keep channel open for async response
+    return;
   }
   
-  // Return false if we don't handle the message to avoid async response warning
-  return false;
+  sendResponse({ success: false, error: 'Unknown message type' });
+}
+
+// Listen for tab close events to clear lock if locked tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.local.get(['lockedTabId'], (result) => {
+    if (result.lockedTabId === tabId) {
+      console.log('[HuntMaster Extension] Locked tab was closed, clearing lock');
+      chrome.storage.local.remove('lockedTabId');
+    }
+  });
 });
 
 

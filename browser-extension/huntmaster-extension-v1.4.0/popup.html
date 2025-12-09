@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>HuntMaster Game Detector</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 350px;
+      max-width: 100%;
+      height: auto;
+      min-height: 600px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+      color: #ffffff;
+      padding: 0;
+      margin: 0 auto;
+      position: relative;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    
+    /* Static background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        linear-gradient(rgba(74, 158, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(74, 158, 255, 0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
+      pointer-events: none;
+    }
+    
+    /* Static particles effect */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle, rgba(74, 158, 255, 0.1) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+      opacity: 0.3;
+    }
+    
+    /* When opened as a window, allow it to be wider */
+    @media (min-width: 400px) {
+      body {
+        width: 100%;
+        max-width: 400px;
+      }
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      position: relative;
+    }
+    
+    .header::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(74, 158, 255, 0.5), transparent);
+      box-shadow: 0 0 10px rgba(74, 158, 255, 0.3);
+    }
+
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #4a9eff 0%, #9f7efe 50%, #4a9eff 100%);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: shimmer 3s linear infinite;
+      text-shadow: 0 0 30px rgba(74, 158, 255, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    
+    .header-icon {
+      width: 32px;
+      height: 32px;
+      filter: drop-shadow(0 0 10px rgba(74, 158, 255, 0.5));
+      animation: iconPulse 3s ease-in-out infinite;
+    }
+    
+    @keyframes iconPulse {
+      0%, 100% {
+        filter: drop-shadow(0 0 10px rgba(74, 158, 255, 0.5));
+        transform: scale(1);
+      }
+      50% {
+        filter: drop-shadow(0 0 15px rgba(74, 158, 255, 0.8));
+        transform: scale(1.05);
+      }
+    }
+    
+    @keyframes shimmer {
+      0% { background-position: 0% center; }
+      100% { background-position: 200% center; }
+    }
+
+    .header p {
+      font-size: 11px;
+      color: #8b9dc3;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .section {
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #4a9eff;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .section-title::before {
+      content: '▶';
+      font-size: 8px;
+      opacity: 0.6;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    .game-info {
+      background: rgba(26, 26, 46, 0.6);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 
+        0 4px 20px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .game-info::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(74, 158, 255, 0.1), transparent);
+      transition: left 0.5s ease;
+    }
+    
+    .game-info:hover::before {
+      left: 100%;
+    }
+    
+    .game-info:hover {
+      border-color: rgba(74, 158, 255, 0.4);
+      box-shadow: 
+        0 4px 20px rgba(0, 0, 0, 0.3),
+        0 0 20px rgba(74, 158, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .game-info-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(74, 158, 255, 0.1);
+      transition: all 0.2s ease;
+    }
+    
+    .game-info-line:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    
+    .game-info-line:hover {
+      padding-left: 4px;
+      border-bottom-color: rgba(74, 158, 255, 0.3);
+    }
+
+    .game-info-label {
+      font-size: 10px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 1px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .game-info-value {
+      font-size: 13px;
+      color: #ffffff;
+      font-weight: 600;
+      text-align: right;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-shadow: 0 0 10px rgba(74, 158, 255, 0.3);
+    }
+
+    .game-info-value.empty {
+      color: #5a6b8a;
+      font-style: italic;
+      text-shadow: none;
+    }
+
+    .game-info-value.editable {
+      cursor: text;
+      padding: 4px 8px;
+      border-radius: 4px;
+      min-width: 120px;
+      transition: all 0.2s ease;
+    }
+
+    .game-info-value.editable:hover {
+      background: rgba(74, 158, 255, 0.1);
+      border: 1px solid rgba(74, 158, 255, 0.3);
+    }
+
+    .game-info-value.editable:focus {
+      outline: none;
+      background: rgba(26, 26, 46, 0.8);
+      border: 1px solid #4a9eff;
+      box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+    }
+
+    .game-info-value.editable[contenteditable="true"]:empty:before {
+      content: attr(data-placeholder);
+      color: #5a6b8a;
+      font-style: italic;
+    }
+
+    input, button {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: none;
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.3s ease;
+    }
+
+    input {
+      background: rgba(26, 26, 46, 0.6);
+      backdrop-filter: blur(10px);
+      color: #ffffff;
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+    
+    input::placeholder {
+      color: #5a6b8a;
+      font-weight: 400;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #4a9eff;
+      box-shadow: 
+        0 0 0 3px rgba(74, 158, 255, 0.1),
+        0 0 20px rgba(74, 158, 255, 0.3);
+      background: rgba(26, 26, 46, 0.8);
+    }
+
+    button {
+      background: linear-gradient(135deg, #4a9eff 0%, #6b8eff 100%);
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 10px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 
+        0 4px 15px rgba(74, 158, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    
+    button::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.3);
+      transform: translate(-50%, -50%);
+      transition: width 0.6s, height 0.6s;
+    }
+    
+    button:hover::before {
+      width: 300px;
+      height: 300px;
+    }
+    
+    button:hover {
+      background: linear-gradient(135deg, #5aaeff 0%, #7b9eff 100%);
+      box-shadow: 
+        0 6px 25px rgba(74, 158, 255, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+    
+    button:active {
+      transform: translateY(0);
+      box-shadow: 
+        0 2px 10px rgba(74, 158, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    
+    button span {
+      position: relative;
+      z-index: 1;
+    }
+
+    button:disabled {
+      background: rgba(58, 58, 78, 0.6);
+      color: #5a6b8a;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    button.secondary {
+      background: transparent;
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      color: #8b9dc3;
+      box-shadow: none;
+    }
+
+    button.secondary:hover {
+      border-color: #4a9eff;
+      color: #ffffff;
+      background: rgba(74, 158, 255, 0.1);
+      box-shadow: 0 0 15px rgba(74, 158, 255, 0.2);
+    }
+
+    .status {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      text-align: center;
+      margin-top: 12px;
+      font-weight: 500;
+      backdrop-filter: blur(10px);
+      border: 1px solid;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .status:empty {
+      min-height: 0;
+      padding: 0;
+      margin: 0;
+      border: none;
+    }
+
+    .status.success {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #10b981;
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+    }
+
+    .status.error {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+    }
+
+    .status.info {
+      background: rgba(74, 158, 255, 0.15);
+      border-color: rgba(74, 158, 255, 0.3);
+      color: #4a9eff;
+      box-shadow: 0 0 15px rgba(74, 158, 255, 0.2);
+    }
+
+    .loading {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(74, 158, 255, 0.3);
+      border-top-color: #4a9eff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+      box-shadow: 0 0 10px rgba(74, 158, 255, 0.5);
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .api-config {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(74, 158, 255, 0.2);
+      font-size: 11px;
+    }
+
+    .api-config label {
+      display: block;
+      margin-bottom: 6px;
+      color: #8b9dc3;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .api-config input {
+      font-size: 12px;
+      padding: 10px 12px;
+    }
+    
+    .api-config p {
+      font-size: 10px;
+      color: #5a6b8a;
+      margin-top: 8px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      color: #8b9dc3;
+      font-size: 11px;
+      padding: 8px 12px;
+      margin-bottom: 0;
+      font-weight: 500;
+    }
+
+    .refresh-btn:hover {
+      border-color: #4a9eff;
+      color: #ffffff;
+      background: rgba(74, 158, 255, 0.1);
+      box-shadow: 0 0 15px rgba(74, 158, 255, 0.2);
+    }
+    
+    #open-window-btn {
+      background: linear-gradient(135deg, rgba(74, 158, 255, 0.2) 0%, rgba(159, 126, 254, 0.2) 100%);
+      border: 1px solid rgba(74, 158, 255, 0.4);
+      color: #4a9eff;
+      font-weight: 600;
+      margin-top: 12px;
+      padding: 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    #open-window-btn:hover {
+      background: linear-gradient(135deg, rgba(74, 158, 255, 0.3) 0%, rgba(159, 126, 254, 0.3) 100%);
+      border-color: #4a9eff;
+      box-shadow: 0 0 20px rgba(74, 158, 255, 0.4);
+      color: #ffffff;
+    }
+
+    #user-info {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: rgba(26, 26, 46, 0.6);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      border-radius: 8px;
+      font-size: 11px;
+      color: #8b9dc3;
+      display: none;
+      font-weight: 500;
+    }
+    
+    #user-info span {
+      color: #10b981;
+      text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+    }
+
+    .win-recording-grid {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .win-recording-grid > div {
+      flex: 1;
+    }
+
+    .win-recording-grid label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 9px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .win-recording-grid input {
+      font-size: 12px;
+      padding: 8px 10px;
+      margin-bottom: 0;
+    }
+    
+    .xwin-display {
+      margin-bottom: 10px;
+      padding: 12px;
+      background: rgba(26, 26, 46, 0.6);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(154, 217, 122, 0.3);
+      border-radius: 8px;
+      font-size: 11px;
+      box-shadow: 0 0 15px rgba(154, 217, 122, 0.2);
+    }
+    
+    .xwin-display > div {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .xwin-display span:first-child {
+      color: #8b9dc3;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    
+    .xwin-display span:last-child {
+      color: #9ad97a;
+      font-weight: 700;
+      font-size: 14px;
+      text-shadow: 0 0 10px rgba(154, 217, 122, 0.5);
+    }
+    
+    #record-win-btn {
+      background: linear-gradient(135deg, #9ad97a 0%, #7bc87a 100%);
+      box-shadow: 
+        0 4px 15px rgba(154, 217, 122, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    
+    #record-win-btn:hover {
+      background: linear-gradient(135deg, #aae98a 0%, #8bd88a 100%);
+      box-shadow: 
+        0 6px 25px rgba(154, 217, 122, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><img src="icon48.png" alt="HuntMaster" class="header-icon" /> HuntMaster</h1>
+      <p>Game Detection System</p>
+      <button id="open-window-btn" class="refresh-btn">📌 Open in Window</button>
+      <div id="user-info">
+        <span id="logged-in-text">Not logged in</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Detected Game</div>
+      <div class="game-info">
+        <div class="game-info-line">
+          <span class="game-info-label">Game</span>
+          <span class="game-info-value editable" id="detected-game" contenteditable="true" data-placeholder="Detecting...">Detecting...</span>
+        </div>
+        <div class="game-info-line">
+          <span class="game-info-label">Provider</span>
+          <span class="game-info-value editable" id="detected-provider" contenteditable="true" data-placeholder="-">-</span>
+        </div>
+        <div class="game-info-line">
+          <span class="game-info-label">Source</span>
+          <span class="game-info-value" id="detected-source">-</span>
+        </div>
+      </div>
+      <button id="refresh-btn" class="refresh-btn"><span>🔄 Refresh Detection</span></button>
+      <button id="update-btn"><span>Update Current Game</span></button>
+      <button id="clear-btn" class="secondary"><span>Clear Current Game</span></button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Win Recording</div>
+      <div class="win-recording-grid">
+        <div>
+          <label>Stake</label>
+          <input type="number" id="stake-amount" placeholder="0.00" step="0.01" min="0" />
+        </div>
+        <div>
+          <label>Win Amount</label>
+          <input type="number" id="win-amount" placeholder="0.00" step="0.01" min="0" />
+        </div>
+      </div>
+      <div class="xwin-display">
+        <div>
+          <span>X Win:</span>
+          <span id="calculated-xwin">-</span>
+        </div>
+      </div>
+      <button id="record-win-btn"><span>💰 Record Win</span></button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">API Configuration</div>
+      <div class="api-config">
+        <label>API Base URL:</label>
+        <input type="text" id="api-base-url" placeholder="https://huntmaster.vercel.app" />
+        <label style="margin-top: 12px;">Session Token:</label>
+        <input type="password" id="session-token" placeholder="Paste your session token here" />
+        <p>
+          Copy your session token from HuntMaster dashboard (Click "Copy ID for Browser Extension") and paste it here. This only needs to be done once and will persist until you log out.
+        </p>
+        <button id="save-config-btn" class="secondary"><span>Save Configuration</span></button>
+      </div>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -31,3 +31,4 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_users_planExpiresAt ON users("planExpiresAt") WHERE "planExpiresAt" IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_plan_expires_at ON users("plan_expires_at") WHERE "plan_expires_at" IS NOT NULL;
 
+

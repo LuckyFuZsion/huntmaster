@@ -11,7 +11,7 @@ interface InactiveUserModalProps {
 
 export function InactiveUserModal({ open, onClose }: InactiveUserModalProps) {
   const handleEmailClick = () => {
-    window.location.href = "mailto:steve@luckyfuzsion.com?subject=Account Access Request&body=Hello,%0D%0A%0D%0AI would like to request access to my Huntmaster account.%0D%0A%0D%0AThank you."
+    window.location.href = "mailto:steve@luckyfuzsion.com?subject=Account Access Request&body=Hello,%0D%0A%0D%0AI would like to request access to my Huntmaster account.%0D%0A%0D%0APlease specify which casino I'll be using:%0D%0A%0D%0AThank you."
   }
 
   return (
@@ -32,6 +32,12 @@ export function InactiveUserModal({ open, onClose }: InactiveUserModalProps) {
           </p>
           <div className="bg-gray-800/50 p-3 rounded border border-gray-700">
             <p className="text-blue-400 font-mono text-sm">steve@luckyfuzsion.com</p>
+          </div>
+          <div className="bg-yellow-900/20 border border-yellow-700/50 rounded p-3 mt-3">
+            <p className="text-yellow-200 text-sm font-medium mb-1">📝 Important:</p>
+            <p className="text-yellow-100 text-sm">
+              Please specify which casino you'll be using in your email request. This helps us set up your account properly.
+            </p>
           </div>
           <p className="text-gray-400 text-sm">
             Access may be restricted to ensure the security and proper management of the platform. 

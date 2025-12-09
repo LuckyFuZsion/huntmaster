@@ -38,6 +38,11 @@ function getSupabaseAdminClient() {
   return supabaseClient
 }
 
+// Export client for direct table queries
+export function getSupabaseClient() {
+  return getSupabaseAdminClient()
+}
+
 // Helper function to normalize user data (handle both camelCase and snake_case)
 function normalizeUser(user: any): User {
   return {

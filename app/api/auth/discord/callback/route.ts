@@ -285,6 +285,18 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    // Check if user's plan has expired - admins are exempt from plan expiration
+    if (!user.isAdmin && user.planExpiresAt) {
+      const expirationDate = new Date(user.planExpiresAt)
+      const now = new Date()
+      
+      if (expirationDate < now) {
+        // Plan expired - redirect to login with error message
+        const errorMessage = "Your subscription plan has expired. Please contact an administrator to renew your access."
+        return NextResponse.redirect(`${baseUrl}/login?error=${encodeURIComponent(errorMessage)}&planExpired=true`)
+      }
+    }
+
     // Create session with actual user data (user is active)
     // Use huntmasterAdmin for HuntMaster admin access (separate from main app admin)
     const session = {

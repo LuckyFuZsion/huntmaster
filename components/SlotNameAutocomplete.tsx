@@ -98,18 +98,55 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
       return;
     }
     
-    // Check client-side cache first for instant results
-    const cached = searchCacheRef.current.get(query);
+    // Check client-side cache for instant results (exact match or partial match)
+    // Try exact match first, then try partial matches (e.g., "buffalo" matches cache for "buffalo king")
+    let cached: Suggestion[] | undefined = searchCacheRef.current.get(query);
+    
+    // If no exact match, try to find cached results that contain the query
+    if (!cached) {
+      // Check all cache entries to find ones that match the current query
+      for (const [cachedQuery, cachedResults] of searchCacheRef.current.entries()) {
+        // If the cached query contains the current query, use those results (filtered)
+        if (cachedQuery.includes(query) && cachedQuery.length > query.length) {
+          // Filter cached results to only show ones that match the current query
+          const filtered = cachedResults.filter((item) =>
+            item.title.toLowerCase().includes(query)
+          );
+          if (filtered.length > 0) {
+            cached = filtered;
+            break;
+          }
+        }
+        // Also check if current query is a prefix of cached query (e.g., "buff" matches "buffalo")
+        if (query.length >= 3 && cachedQuery.startsWith(query)) {
+          const filtered = cachedResults.filter((item) =>
+            item.title.toLowerCase().includes(query)
+          );
+          if (filtered.length > 0) {
+            cached = filtered;
+            break;
+          }
+        }
+      }
+    }
+    
     if (cached) {
-      setItems(cached);
-      setOpen(cached.length > 0);
-      setHighlight(0);
-      return;
+      // Filter cached results to ensure they match the current query
+      const filtered = cached.filter((item) =>
+        item.title.toLowerCase().includes(query)
+      );
+      if (filtered.length > 0) {
+        setItems(filtered);
+        setOpen(true);
+        setHighlight(0);
+        return;
+      }
     }
 
     // COST OPTIMIZATION: Don't show empty state or call API automatically
     // User must explicitly press Enter or click search button to trigger API call
     // This prevents accidental API calls while typing
+    // Cached results will show instantly if available, but API search is still available
     setItems([]);
     setOpen(false);
   }, [value, minChars, userSlots]);
@@ -124,58 +161,33 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
 
     const query = value.trim().toLowerCase();
     
-    // Skip if we just searched this exact query
-    if (lastSearchedRef.current === query) {
-      return;
-    }
-
-    // Check cache first
+    // Show cached results immediately for instant feedback while API loads
     const cached = searchCacheRef.current.get(query);
     if (cached) {
-      setItems(cached);
-      setOpen(cached.length > 0);
-      setHighlight(0);
-      lastSearchedRef.current = query;
-      return;
+      // Filter to ensure cached results match the query
+      const filtered = cached.filter((item) =>
+        item.title.toLowerCase().includes(query)
+      );
+      if (filtered.length > 0) {
+        setItems(filtered);
+        setOpen(filtered.length > 0);
+        setHighlight(0);
+        // Show cached results immediately, but always proceed to API search below
+      }
     }
+    
+    // Always make API call when user explicitly searches (Enter/button)
+    // This ensures fresh/complete results even if cache exists
+    // The cache is only for instant display while typing, not for blocking searches
 
     setLoading(true);
     try {
       // Get session for usage tracking
       const session = localStorage.getItem("huntmaster_session");
       
-      // OPTIMIZATION: Check database first (cheap, no external API)
-      // This avoids expensive external API calls for games already in database
-      if (session) {
-        try {
-          const checkUrl = `/api/games/check-exists?gameTitle=${encodeURIComponent(value.trim())}&session=${encodeURIComponent(session)}`;
-          const checkRes = await fetch(checkUrl, { cache: "no-store" });
-          const checkData = await checkRes.json();
-          
-          if (checkData.success && checkData.exists && checkData.source !== "error") {
-            // Game exists in database - create suggestion from it (no external API call needed)
-            const suggestion: Suggestion = {
-              id: Date.now(), // Temporary ID
-              slug: value.trim().toLowerCase().replace(/\s+/g, "-"),
-              title: value.trim(),
-              provider: undefined,
-            };
-            
-            const suggestions = [suggestion];
-            searchCacheRef.current.set(query, suggestions);
-            setItems(suggestions);
-            setOpen(true);
-            setHighlight(0);
-            lastSearchedRef.current = query;
-            setLoading(false);
-            console.log("✓ Game found in database, skipping external API call");
-            return; // Skip external API call
-          }
-        } catch (checkError) {
-          // If database check fails, continue to external API
-          console.log("Database check failed, using external API:", checkError);
-        }
-      }
+      // Always make external API call to get all matching games
+      // The database check optimization was too aggressive - for search/autocomplete,
+      // we want to show all matching games, not just the one in the database
       
       // Fallback to external API if not found in database
       const urlWithSession = session 
@@ -227,6 +239,7 @@ export default function SlotNameAutocomplete({ value, onChange, onSelect, placeh
       setOpen(deduplicated.length > 0);
       setHighlight(0);
       lastSearchedRef.current = query;
+      (window as any).lastSearchTime = Date.now(); // Track when we last searched
     } catch (error) {
       console.error('SlotNameAutocomplete: Error fetching suggestions', error);
       setItems([]);

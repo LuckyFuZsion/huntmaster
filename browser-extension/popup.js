@@ -501,6 +501,73 @@ async function clearCurrentGame() {
   }
 }
 
+// Lock/unlock tab functionality
+async function toggleTabLock() {
+  const lockBtn = document.getElementById('lock-tab-btn');
+  const lockStatus = document.getElementById('lock-status');
+  
+  try {
+    const result = await chrome.storage.local.get(['lockedTabId']);
+    const currentLockedTabId = result.lockedTabId;
+    
+    if (currentLockedTabId) {
+      // Unlock: clear the locked tab ID
+      await chrome.storage.local.remove('lockedTabId');
+      lockBtn.innerHTML = '<span>🔒 Lock to This Tab</span>';
+      lockStatus.style.display = 'none';
+      showStatus('Tab lock removed', 'info');
+    } else {
+      // Lock: get current tab and store its ID
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.id) {
+        await chrome.storage.local.set({ lockedTabId: tab.id });
+        lockBtn.innerHTML = '<span>🔓 Unlock Tab</span>';
+        lockStatus.textContent = `🔒 Locked to tab: ${tab.url || 'Current tab'}`;
+        lockStatus.className = 'status info';
+        lockStatus.style.display = 'block';
+        showStatus('Tab locked - extension will only work on this tab', 'success');
+      } else {
+        showStatus('Could not get current tab', 'error');
+      }
+    }
+  } catch (error) {
+    console.error('Error toggling tab lock:', error);
+    showStatus(`Error: ${error.message}`, 'error');
+  }
+}
+
+// Update lock status display
+async function updateLockStatus() {
+  const lockBtn = document.getElementById('lock-tab-btn');
+  const lockStatus = document.getElementById('lock-status');
+  
+  try {
+    const result = await chrome.storage.local.get(['lockedTabId']);
+    const lockedTabId = result.lockedTabId;
+    
+    if (lockedTabId) {
+      // Check if the locked tab still exists
+      try {
+        const tab = await chrome.tabs.get(lockedTabId);
+        lockBtn.innerHTML = '<span>🔓 Unlock Tab</span>';
+        lockStatus.textContent = `🔒 Locked to tab: ${tab.url || 'Tab ' + lockedTabId}`;
+        lockStatus.className = 'status info';
+        lockStatus.style.display = 'block';
+      } catch (error) {
+        // Tab was closed, clear the lock
+        await chrome.storage.local.remove('lockedTabId');
+        lockBtn.innerHTML = '<span>🔒 Lock to This Tab</span>';
+        lockStatus.style.display = 'none';
+      }
+    } else {
+      lockBtn.innerHTML = '<span>🔒 Lock to This Tab</span>';
+      lockStatus.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Error updating lock status:', error);
+  }
+}
+
 // Show status message
 function showStatus(message, type = 'info', targetElementId = 'status') {
   const statusEl = document.getElementById(targetElementId);
@@ -651,11 +718,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Add to hunt button
   document.getElementById('add-to-hunt-btn').addEventListener('click', addToHunt);
 
+  // Lock/unlock tab button
+  document.getElementById('lock-tab-btn').addEventListener('click', toggleTabLock);
+
   // Update user info when session token field changes
   document.getElementById('session-token').addEventListener('input', (e) => {
     const sessionToken = e.target.value.trim();
     updateUserInfo(sessionToken);
   });
+
+  // Check lock status on load
+  updateLockStatus();
 });
 
 

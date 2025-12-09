@@ -80,6 +80,20 @@ export async function login(formData: FormData) {
       }
     }
 
+    // Check if user's plan has expired - admins are exempt from plan expiration
+    if (!user.isAdmin && user.planExpiresAt) {
+      const expirationDate = new Date(user.planExpiresAt)
+      const now = new Date()
+      
+      if (expirationDate < now) {
+        return {
+          success: false,
+          error: "Your subscription plan has expired. Please contact an administrator to renew your access.",
+          planExpired: true,
+        }
+      }
+    }
+
     console.log("Login successful for:", user.username)
 
     // Create session
