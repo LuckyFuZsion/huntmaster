@@ -226,17 +226,8 @@ async function autoUpdateCurrentGame(gameInfo) {
       }
     }
     
-    // Check if game exists in database before updating
+    // Update the current game via API (no need to check if game exists - let the API handle it)
     const gameTitleTrimmed = gameInfo.title.trim();
-    console.log('[HuntMaster Extension] Checking if game exists in database:', gameTitleTrimmed);
-    const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken);
-    
-    if (!gameExists) {
-      console.log('[HuntMaster Extension] ⚠️ Game not found in database, skipping auto-update:', gameTitleTrimmed);
-      return;
-    }
-    
-    // Update the current game via API
     console.log('[HuntMaster Extension] Auto-updating current game:', gameTitleTrimmed);
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
       method: 'POST',
