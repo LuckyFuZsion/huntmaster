@@ -1275,10 +1275,104 @@ ${slotListInfo}`
   }
 
   return (
-    <div className="absolute top-0 left-0 w-full max-w-[324px]">
-      <Card className="w-full">
-        <CardContent className="p-4 pt-1">
-          <div className="space-y-4">
+    <>
+      <style jsx global>{`
+        /* Extension Theme Styles */
+        .extension-theme-card {
+          background: rgba(26, 26, 46, 0.6) !important;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(74, 158, 255, 0.2) !important;
+          box-shadow: 
+            0 4px 20px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+        .extension-theme-button {
+          background: linear-gradient(135deg, #4a9eff 0%, #6b8eff 100%) !important;
+          color: #ffffff !important;
+          border: none !important;
+          box-shadow: 
+            0 4px 15px rgba(74, 158, 255, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+          text-transform: uppercase;
+          font-size: 11px;
+          letter-spacing: 0.5px;
+          font-weight: 600;
+        }
+        .extension-theme-button:hover {
+          background: linear-gradient(135deg, #5aaeff 0%, #7b9eff 100%) !important;
+          box-shadow: 
+            0 6px 25px rgba(74, 158, 255, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+        .extension-theme-button-outline {
+          background: transparent !important;
+          border: 1px solid rgba(74, 158, 255, 0.3) !important;
+          color: #8b9dc3 !important;
+        }
+        .extension-theme-button-outline:hover {
+          border-color: #4a9eff !important;
+          color: #ffffff !important;
+          background: rgba(74, 158, 255, 0.1) !important;
+          box-shadow: 0 0 15px rgba(74, 158, 255, 0.2);
+        }
+        .extension-theme-input {
+          background: rgba(26, 26, 46, 0.6) !important;
+          backdrop-filter: blur(10px);
+          color: #ffffff !important;
+          border: 1px solid rgba(74, 158, 255, 0.2) !important;
+        }
+        .extension-theme-input::placeholder {
+          color: #5a6b8a !important;
+        }
+        .extension-theme-input:focus {
+          border-color: #4a9eff !important;
+          box-shadow: 
+            0 0 0 3px rgba(74, 158, 255, 0.1),
+            0 0 20px rgba(74, 158, 255, 0.3);
+          background: rgba(26, 26, 46, 0.8) !important;
+        }
+        .extension-theme-text {
+          color: #ffffff !important;
+        }
+        .extension-theme-text-muted {
+          color: #8b9dc3 !important;
+        }
+        .extension-theme-text-label {
+          color: #8b9dc3 !important;
+          text-transform: uppercase;
+          font-size: 10px;
+          letter-spacing: 1.5px;
+          font-weight: 700;
+        }
+        .extension-theme-section-title {
+          font-size: 10px;
+          font-weight: 700;
+          color: #4a9eff;
+          text-transform: uppercase;
+          letter-spacing: 1.5px;
+        }
+        .extension-theme-table {
+          color: #ffffff;
+        }
+        .extension-theme-table th {
+          color: #4a9eff;
+          font-weight: 700;
+          text-transform: uppercase;
+          font-size: 10px;
+          letter-spacing: 1.5px;
+        }
+        .extension-theme-table td {
+          color: #ffffff;
+          border-color: rgba(74, 158, 255, 0.1);
+        }
+        .extension-theme-table tr:hover {
+          background: rgba(74, 158, 255, 0.1);
+        }
+      `}</style>
+      <div className="absolute top-0 left-0 w-full max-w-[324px] z-10 m-0 p-0">
+        <Card className="w-full extension-theme-card">
+          <CardContent className="p-4 pt-1">
+            <div className="space-y-4">
             {/* View Toggle */}
             <div className="flex gap-2 mb-2">
               <Button
@@ -1338,7 +1432,7 @@ ${slotListInfo}`
                     lastUserEditRef.current.startBalance = startBalance
                   }
                 }}
-                  className={`flex-1 ${noSpinnerClass}`}
+                  className={`flex-1 extension-theme-input ${noSpinnerClass}`}
                 />
                 <Button
                   type="button"
@@ -1390,7 +1484,7 @@ ${slotListInfo}`
                     lastUserEditRef.current.endBalance = endBalance
                   }
                 }}
-                  className={`flex-1 ${noSpinnerClass}`}
+                  className={`flex-1 extension-theme-input ${noSpinnerClass}`}
                 />
                 <Button
                   type="button"
@@ -1439,7 +1533,7 @@ ${slotListInfo}`
                       setNewSlot({ ...newSlot, bet: e.target.value })
                     }
                   }}
-                  className={`flex-1 ${noSpinnerClass}`}
+                  className={`flex-1 extension-theme-input ${noSpinnerClass}`}
                 />
                 <div className="flex items-center space-x-1">
                   <Button
@@ -1452,14 +1546,14 @@ ${slotListInfo}`
                   </Button>
                 </div>
               </div>
-              <Button type="submit" className="w-full">Add Slot</Button>
-              <Button onClick={() => toggleMenu("slotList")} className="w-full mt-2">
+              <Button type="submit" className="w-full extension-theme-button">Add Slot</Button>
+              <Button onClick={() => toggleMenu("slotList")} className="w-full mt-2 extension-theme-button-outline">
                 {activeMenu === "slotList" ? "Hide Slotlist" : "View Slotlist"}
               </Button>
-              <Button onClick={() => toggleMenu("customise")} className="w-full mt-2">
+              <Button onClick={() => toggleMenu("customise")} className="w-full mt-2 extension-theme-button-outline">
                 {activeMenu === "customise" ? "Hide OBS Overlays" : "OBS Overlays"}
               </Button>
-              <Button onClick={() => toggleMenu("widgets")} className="w-full mt-2">
+              <Button onClick={() => toggleMenu("widgets")} className="w-full mt-2 extension-theme-button-outline">
                 {activeMenu === "widgets" ? "Hide Widgets Menu" : "Show Widgets Menu"}
               </Button>
               {activeMenu === "customise" && (
@@ -1502,7 +1596,7 @@ ${slotListInfo}`
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  <Button className="w-full text-xs py-1 px-2">{obs}</Button>
+                                  <Button className="w-full text-xs py-1 px-2 extension-theme-button-outline">{obs}</Button>
                                 </Link>
                               </TooltipTrigger>
                               <TooltipContent>
@@ -1537,7 +1631,7 @@ ${slotListInfo}`
                               target="_blank"
                               rel="noopener noreferrer"
                             >
-                              <Button className="w-full text-xs py-1 px-2">OBS 7</Button>
+                              <Button className="w-full text-xs py-1 px-2 extension-theme-button-outline">OBS 7</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1566,7 +1660,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href={`/obs-8?size=${obsSizes.obs5}`} target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full text-xs py-1 px-2">OBS 8</Button>
+                              <Button className="w-full text-xs py-1 px-2 extension-theme-button-outline">OBS 8</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1600,7 +1694,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/progress-bar" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Progress Bar</Button>
+                              <Button className="w-full extension-theme-button-outline">Progress Bar</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1626,7 +1720,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/top-wins" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Top Wins</Button>
+                              <Button className="w-full extension-theme-button-outline">Top Wins</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1652,7 +1746,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/hunt-stats" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Hunt Stats</Button>
+                              <Button className="w-full extension-theme-button-outline">Hunt Stats</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1678,7 +1772,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/next-bonus" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Next Bonus</Button>
+                              <Button className="w-full extension-theme-button-outline">Next Bonus</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1704,7 +1798,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/start-balance" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Start Balance</Button>
+                              <Button className="w-full extension-theme-button-outline">Start Balance</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1730,7 +1824,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href="/widgets/time-date" target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Time & Date</Button>
+                              <Button className="w-full extension-theme-button-outline">Time & Date</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1761,7 +1855,7 @@ ${slotListInfo}`
                               target="_blank"
                               rel="noopener noreferrer"
                             >
-                              <Button className="w-full">Time & Date Pro</Button>
+                              <Button className="w-full extension-theme-button-outline">Time & Date Pro</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1787,7 +1881,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href={`/widgets/now-playing?user=${currentUsername}&source=extension`} target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Now Playing (Extension)</Button>
+                              <Button className="w-full extension-theme-button-outline">Now Playing (Extension)</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1813,7 +1907,7 @@ ${slotListInfo}`
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Link href={`/widgets/now-playing?user=${currentUsername}&source=hunt`} target="_blank" rel="noopener noreferrer">
-                              <Button className="w-full">Now Playing (Bonus Hunt)</Button>
+                              <Button className="w-full extension-theme-button-outline">Now Playing (Bonus Hunt)</Button>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1840,7 +1934,7 @@ ${slotListInfo}`
             </form>
             {activeMenu === "slotList" && (
               <div className="h-[300px] overflow-y-auto mt-2" ref={slotListRef}>
-                <Table className="w-full">
+                <Table className="w-full extension-theme-table">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Slot Name</TableHead>
@@ -1854,7 +1948,7 @@ ${slotListInfo}`
                         <TableCell>{slot.name}</TableCell>
                         <TableCell>{slot.bet.toFixed(2)}</TableCell>
                         <TableCell>
-                          <Button onClick={() => handleEditSlot(slot)}>Edit</Button>
+                          <Button onClick={() => handleEditSlot(slot)} className="extension-theme-button-outline text-xs">Edit</Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1864,13 +1958,13 @@ ${slotListInfo}`
             )}
             <div className="flex flex-col space-y-2">
               <Link href="/account">
-                <Button className="w-full">My Account</Button>
+                <Button className="w-full extension-theme-button-outline">My Account</Button>
               </Link>
               <Link href="/spider-edit">
-                <Button className="w-full">Customisable Overlay</Button>
+                <Button className="w-full extension-theme-button-outline">Customisable Overlay</Button>
               </Link>
               <Link href="/collect-bonuses">
-                <Button className="w-full">Collect Bonuses</Button>
+                <Button className="w-full extension-theme-button-outline">Collect Bonuses</Button>
               </Link>
               {isAdmin && (
                 <Link href="/admin">
@@ -1990,7 +2084,7 @@ ${slotListInfo}`
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Link href={`/widgets/now-playing?user=${currentUsername}&source=extension`} target="_blank" rel="noopener noreferrer">
-                            <Button className="w-full">Now Playing Widget</Button>
+                            <Button className="w-full extension-theme-button-outline">Now Playing Widget</Button>
                           </Link>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -2076,7 +2170,7 @@ ${slotListInfo}`
       {isEditing && editingSlot && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <Card className="w-full max-w-md mx-auto">
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="space-y-4">
                 <Input
                   placeholder="Slot Name"
@@ -2086,7 +2180,9 @@ ${slotListInfo}`
                 <Input
                   type="number"
                   step="0.01"
-                  onChange={(e) => setEditingSlot({ ...editingSlot, bet: Number.parseFloat(e.target.value) })}
+                  placeholder="Bet Size"
+                  value={editingSlot.bet ? editingSlot.bet.toFixed(2) : ""}
+                  onChange={(e) => setEditingSlot({ ...editingSlot, bet: Number.parseFloat(e.target.value) || 0 })}
                   className={noSpinnerClass}
                 />
                 <div className="flex space-x-4">
@@ -2324,5 +2420,6 @@ ${slotListInfo}`
         </DialogContent>
       </Dialog>
     </div>
+    </>
   )
 }

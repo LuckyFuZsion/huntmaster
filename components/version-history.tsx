@@ -23,6 +23,25 @@ interface VersionUpdate {
 // Version history data - newest first
 const versionHistory: VersionUpdate[] = [
   {
+    version: "2.0.0",
+    date: "December 2025",
+    changes: [
+      "Major UI overhaul: Dashboard now matches browser extension's dark blue theme with grid pattern overlay",
+      "Browser extension auto-update: Now automatically updates 'Now Playing' widget when valid games are detected",
+      "Smart game detection: Extension filters out generic casino terms (casino, lobby, home, etc.) to prevent false updates",
+      "Tab locking: Browser extension can now be locked to a specific browser tab for focused game detection",
+      "Plan expiration system: Added subscription plan expiration tracking and validation at login",
+      "Admin enhancements: Admins can now set and manage user plan expiration dates in the admin panel",
+      "User dashboard: Users can now view their subscription plan status and expiration date",
+      "Interactive instructions: Complete user guide with tabbed interface and mobile-friendly hamburger menu",
+      "Instructions popout: Instructions can now be opened in a new browser tab for better viewing",
+      "Edit slot improvements: Edit dialog now shows existing stake value with proper formatting (2 decimal places)",
+      "Database optimization: Replaced external API calls with direct Supabase database queries for game suggestions",
+      "Improved validation: Enhanced game title validation to prevent invalid names from being detected",
+      "Extension theme consistency: All UI elements now use consistent extension-style colors and design",
+    ],
+  },
+  {
     version: "1.3.0",
     date: "March 11, 2025",
     changes: [

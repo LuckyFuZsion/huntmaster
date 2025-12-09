@@ -25,7 +25,7 @@ async function checkGameExists(gameTitle, apiBaseUrl, sessionToken) {
     const normalizedTitle = normalizeGameTitle(gameTitle);
     const cacheKey = `validated_game:${normalizedTitle}`;
     
-    console.log('[HuntMaster Extension] Checking game existence:', {
+    console.log('[HuntMaster Extension] Checking game existence in database:', {
       original: gameTitle.trim(),
       normalized: normalizedTitle
     });
@@ -44,147 +44,61 @@ async function checkGameExists(gameTitle, apiBaseUrl, sessionToken) {
       }
     }
     
-    // Step 2: Check Supabase database first (cheap - just DB query, no external API)
-    if (sessionToken) {
-      try {
-        const checkUrl = new URL(`${apiBaseUrl}/api/games/check-exists`);
-        checkUrl.searchParams.set('gameTitle', gameTitle.trim());
-        checkUrl.searchParams.set('session', sessionToken);
-        
-        const checkResponse = await fetch(checkUrl.toString(), { cache: 'no-store' });
-        const checkData = await checkResponse.json();
-        
-        if (checkData.success && checkData.exists) {
-          console.log('[HuntMaster Extension] ✓ Game found in database (no external API call needed)');
-          // Cache the result
-          await chrome.storage.local.set({
-            [cacheKey]: {
-              exists: true,
-              timestamp: Date.now(),
-              source: checkData.source
-            }
-          });
-          return true;
-        }
-        
-        // If not found in database, continue to external API check
-        console.log('[HuntMaster Extension] Game not found in database, checking external API...');
-      } catch (error) {
-        console.error('[HuntMaster Extension] Database check failed, falling back to external API:', error);
-      }
+    // Step 2: Check Supabase database ONLY - no external API fallback
+    // This ensures widget only updates for recognized games in the database
+    if (!sessionToken) {
+      console.log('[HuntMaster Extension] No session token, cannot verify game in database');
+      return false;
     }
     
-    // Step 3: Fallback to external API (expensive - only if not found in database)
-    // Try searching with the original title first
-    const searchUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
-    searchUrl.searchParams.set('q', gameTitle.trim());
-    searchUrl.searchParams.set('limit', '20'); // Increase limit to get more results
-    // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
-    
-    // Pass session token for usage tracking (if available)
-    if (sessionToken) {
-      searchUrl.searchParams.set('session', sessionToken);
-    }
-    
-    const response = await fetch(searchUrl.toString(), { cache: 'no-store' });
-    const data = await response.json();
-    
-    if (data.success && Array.isArray(data.data)) {
-      console.log('[HuntMaster Extension] Search returned', data.data.length, 'results');
+    try {
+      const checkUrl = new URL(`${apiBaseUrl}/api/games/check-exists`);
+      checkUrl.searchParams.set('gameTitle', gameTitle.trim());
+      checkUrl.searchParams.set('session', sessionToken);
       
-      // Check if any game in results matches (ignoring hyphens/dashes and case)
-      let gameExists = data.data.some((game) => {
-        if (!game.title) return false;
-        const normalizedGameTitle = normalizeGameTitle(game.title);
-        const matches = normalizedGameTitle === normalizedTitle;
-        if (matches) {
-          console.log('[HuntMaster Extension] ✓ Found matching game:', {
-            detected: gameTitle.trim(),
-            database: game.title,
-            normalized: normalizedGameTitle
-          });
-        }
-        return matches;
-      });
+      const checkResponse = await fetch(checkUrl.toString(), { cache: 'no-store' });
       
-      // If not found, try searching again with title without dash (preserving capitalization)
-      if (!gameExists) {
-        // Remove dash but keep original capitalization: "Zeus vs Hades - Gods of War" -> "Zeus vs Hades Gods of War"
-        const titleWithoutDash = gameTitle.trim().replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
-        if (titleWithoutDash !== gameTitle.trim()) {
-          console.log('[HuntMaster Extension] Trying fallback search without dash:', titleWithoutDash);
-          const fallbackUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
-          fallbackUrl.searchParams.set('q', titleWithoutDash);
-          fallbackUrl.searchParams.set('limit', '20');
-          // REMOVED: exhaustive=1 - too expensive, fetches all pages (10-20+ API calls)
-          
-          // Pass session token for usage tracking (if available)
-          if (sessionToken) {
-            fallbackUrl.searchParams.set('session', sessionToken);
-          }
-          
-          try {
-            const fallbackResponse = await fetch(fallbackUrl.toString(), { cache: 'no-store' });
-            const fallbackData = await fallbackResponse.json();
-            
-            if (fallbackData.success && Array.isArray(fallbackData.data)) {
-              console.log('[HuntMaster Extension] Fallback search returned', fallbackData.data.length, 'results');
-              gameExists = fallbackData.data.some((game) => {
-                if (!game.title) return false;
-                const normalizedGameTitle = normalizeGameTitle(game.title);
-                const matches = normalizedGameTitle === normalizedTitle;
-                if (matches) {
-                  console.log('[HuntMaster Extension] ✓ Found matching game in fallback:', {
-                    detected: gameTitle.trim(),
-                    database: game.title,
-                    normalized: normalizedGameTitle
-                  });
-                }
-                return matches;
-              });
-            }
-          } catch (fallbackError) {
-            console.error('[HuntMaster Extension] Fallback search error:', fallbackError);
-          }
-        }
+      if (!checkResponse.ok) {
+        console.error('[HuntMaster Extension] Database check failed with status:', checkResponse.status);
+        // Don't update widget if database check fails
+        return false;
       }
       
-      if (!gameExists && data.data.length > 0) {
-        // Log what we found for debugging
-        console.log('[HuntMaster Extension] No exact match found. Top results:', 
-          data.data.slice(0, 5).map(g => ({
-            title: g.title,
-            normalized: normalizeGameTitle(g.title)
-          }))
-        );
+      const checkData = await checkResponse.json();
+      
+      if (checkData.success && checkData.exists) {
+        console.log('[HuntMaster Extension] ✓ Game found in database');
+        // Cache the result
+        await chrome.storage.local.set({
+          [cacheKey]: {
+            exists: true,
+            timestamp: Date.now(),
+            source: checkData.source || 'database'
+          }
+        });
+        return true;
       }
       
-      // Cache the result (whether found or not)
+      // If not found in database, return false (don't update widget)
+      console.log('[HuntMaster Extension] Game not found in database, skipping auto-update');
+      // Cache negative result
       await chrome.storage.local.set({
         [cacheKey]: {
-          exists: gameExists,
+          exists: false,
           timestamp: Date.now(),
-          source: 'external_api'
+          source: 'database_not_found'
         }
       });
-      
-      return gameExists;
+      return false;
+    } catch (error) {
+      console.error('[HuntMaster Extension] Database check failed:', error);
+      // Don't update widget if database check fails
+      return false;
     }
-    
-    console.log('[HuntMaster Extension] Search failed or returned no results');
-    // Cache negative result too (to avoid repeated failed searches)
-    await chrome.storage.local.set({
-      [cacheKey]: {
-        exists: false,
-        timestamp: Date.now(),
-        source: 'external_api_failed'
-      }
-    });
-    return false;
   } catch (error) {
     console.error('[HuntMaster Extension] Error checking game existence:', error);
-    // If check fails, don't block the update (fail open)
-    return true;
+    // If check fails, don't update widget (fail closed - only update if game is confirmed in database)
+    return false;
   }
 }
 
@@ -214,6 +128,68 @@ async function autoUpdateCurrentGame(gameInfo) {
       return;
     }
     
+    // Additional validation: reject generic casino terms
+    const invalidGameNames = [
+      'casino', 'casinos', 'cryptocasino', 'gamba',
+      'home', 'lobby', 'main', 'index', 'welcome',
+      'login', 'register', 'sign in', 'sign up',
+      'account', 'profile', 'settings', 'help', 'support',
+      'deposit', 'withdraw', 'cashier', 'banking',
+      'promotions', 'bonuses', 'vip', 'rewards',
+      'terms', 'privacy', 'about', 'contact'
+    ];
+    
+    const gameTitleLower = gameInfo.title.trim().toLowerCase();
+    
+    // Check exact match
+    if (invalidGameNames.includes(gameTitleLower)) {
+      console.log('[HuntMaster Extension] Generic casino term detected (exact match), skipping auto-update:', gameInfo.title);
+      return;
+    }
+    
+    // Check if title CONTAINS casino terms as whole words
+    const casinoTerms = [
+      'casino', 'casinos', 'cryptocasino', 'gamba',
+      'home', 'lobby', 'main', 'index', 'welcome',
+      'login', 'register', 'sign in', 'sign up',
+      'account', 'profile', 'settings', 'help', 'support',
+      'deposit', 'withdraw', 'cashier', 'banking',
+      'promotions', 'bonuses', 'vip', 'rewards',
+      'terms', 'privacy', 'about', 'contact',
+      'online casino', 'play online', 'free play', 'demo play'
+    ];
+    
+    for (const term of casinoTerms) {
+      // Use word boundary regex to match whole words only
+      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(gameTitleLower)) {
+        console.log('[HuntMaster Extension] Generic casino term detected (contains term), skipping auto-update:', gameInfo.title, '(contains:', term, ')');
+        return;
+      }
+    }
+    
+    // Reject if title looks like a page title (contains "|" or " - " with common page terms)
+    if (gameTitleLower.includes('|') || gameTitleLower.includes(' - ')) {
+      const pageTerms = ['home', 'lobby', 'casino', 'games', 'slots', 'live casino', 'sports'];
+      const hasPageTerm = pageTerms.some(term => gameTitleLower.includes(term));
+      if (hasPageTerm) {
+        console.log('[HuntMaster Extension] Title looks like a page title, skipping auto-update:', gameInfo.title);
+        return;
+      }
+    }
+    
+    // Reject if title is too short (likely not a game name)
+    if (gameTitleLower.length < 3) {
+      console.log('[HuntMaster Extension] Title too short, skipping auto-update:', gameInfo.title);
+      return;
+    }
+    
+    // Reject if title is just a domain name
+    if (gameTitleLower.match(/^[a-z0-9-]+\.(com|net|org|io)$/)) {
+      console.log('[HuntMaster Extension] Domain name detected, skipping auto-update:', gameInfo.title);
+      return;
+    }
+    
     // Check if this is the same game as last update (avoid duplicate API calls)
     // Only check title (normalized), not provider - if title matches, skip update
     const lastUpdated = result.lastAutoUpdatedGame;
@@ -226,9 +202,20 @@ async function autoUpdateCurrentGame(gameInfo) {
       }
     }
     
-    // Update the current game via API (no need to check if game exists - let the API handle it)
+    // IMPORTANT: Verify game exists in database before updating widget
+    // This ensures only recognized/valid games update the "now playing" widget
     const gameTitleTrimmed = gameInfo.title.trim();
-    console.log('[HuntMaster Extension] Auto-updating current game:', gameTitleTrimmed);
+    console.log('[HuntMaster Extension] 🔍 Verifying game exists in database before updating:', gameTitleTrimmed);
+    const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken);
+    
+    if (!gameExists) {
+      console.log('[HuntMaster Extension] ⚠️ Game NOT found in database - BLOCKING auto-update:', gameTitleTrimmed);
+      console.log('[HuntMaster Extension] 💡 Tip: Game must exist in database (slots, game_reviews, or slotslaunch_games) to auto-update widget');
+      return;
+    }
+    
+    // Game exists - update the current game via API
+    console.log('[HuntMaster Extension] ✅ Game VERIFIED in database - proceeding with auto-update:', gameTitleTrimmed);
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
       method: 'POST',
       headers: {

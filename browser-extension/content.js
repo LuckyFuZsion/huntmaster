@@ -302,6 +302,79 @@
     }
   ];
 
+  // List of invalid game names that should never be detected as games
+  const INVALID_GAME_NAMES = [
+    'casino', 'casinos', 'cryptocasino', 'gamba',
+    'home', 'lobby', 'main', 'index', 'welcome',
+    'login', 'register', 'sign in', 'sign up',
+    'account', 'profile', 'settings', 'help', 'support',
+    'deposit', 'withdraw', 'cashier', 'banking',
+    'promotions', 'bonuses', 'vip', 'rewards',
+    'terms', 'privacy', 'about', 'contact'
+  ];
+
+  // Check if a game title is invalid (generic casino terms, etc.)
+  function isValidGameTitle(title) {
+    if (!title || !title.trim()) return false;
+    
+    const titleLower = title.toLowerCase().trim();
+    
+    // Check against invalid names list (exact match)
+    if (INVALID_GAME_NAMES.includes(titleLower)) {
+      return false;
+    }
+    
+    // Check if title CONTAINS invalid casino terms (not just exact match)
+    const casinoTerms = [
+      'casino', 'casinos', 'cryptocasino', 'gamba',
+      'home', 'lobby', 'main', 'index', 'welcome',
+      'login', 'register', 'sign in', 'sign up',
+      'account', 'profile', 'settings', 'help', 'support',
+      'deposit', 'withdraw', 'cashier', 'banking',
+      'promotions', 'bonuses', 'vip', 'rewards',
+      'terms', 'privacy', 'about', 'contact',
+      'online casino', 'play online', 'free play', 'demo play'
+    ];
+    
+    // If title contains any casino term as a whole word, reject it
+    for (const term of casinoTerms) {
+      // Use word boundary regex to match whole words only
+      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(titleLower)) {
+        console.log('[HuntMaster Extension] Rejected title containing casino term:', term, 'in:', title);
+        return false;
+      }
+    }
+    
+    // Check if title is just a domain name
+    if (titleLower.match(/^[a-z0-9-]+\.(com|net|org|io)$/)) {
+      return false;
+    }
+    
+    // Check if title is too short (likely not a game name)
+    if (titleLower.length < 3) {
+      return false;
+    }
+    
+    // Check if title is just common casino words
+    const commonCasinoWords = ['play', 'game', 'slot', 'casino', 'online'];
+    if (commonCasinoWords.includes(titleLower)) {
+      return false;
+    }
+    
+    // Reject if title looks like a page title (contains "|" or " - " with common page terms)
+    if (titleLower.includes('|') || titleLower.includes(' - ')) {
+      const pageTerms = ['home', 'lobby', 'casino', 'games', 'slots', 'live casino', 'sports'];
+      const hasPageTerm = pageTerms.some(term => titleLower.includes(term));
+      if (hasPageTerm) {
+        console.log('[HuntMaster Extension] Rejected title that looks like a page title:', title);
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
   function extractGameInfo() {
     const gameInfo = {
       title: null,
@@ -320,14 +393,8 @@
       // Try casino-specific parser first
       const casinoSpecific = parseTitleForCasino(pageTitle, casino);
       if (casinoSpecific && casinoSpecific.title) {
-        // Only reject if it's clearly just a domain name (very short with .com)
-        const titleLower = casinoSpecific.title.toLowerCase().trim();
-        const isInvalidTitle = 
-          (titleLower.match(/^[a-z0-9-]+\.(com|net|org)$/)) || // Exact domain match like "cryptocasino.com"
-          titleLower === 'cryptocasino' ||
-          titleLower === 'casino';
-        
-        if (!isInvalidTitle) {
+        // Validate the extracted title using the comprehensive validation function
+        if (isValidGameTitle(casinoSpecific.title)) {
           gameInfo.title = casinoSpecific.title;
           gameInfo.provider = casinoSpecific.provider || null;
           gameInfo.source = `page-title-${casino}`;
@@ -340,16 +407,20 @@
         for (const pattern of detectionPatterns[0].patterns) {
           const match = pageTitle.match(pattern);
           if (match) {
-            gameInfo.title = match[1].trim();
-            if (match[2]) {
-              // Try to extract provider
-              const providerMatch = match[2].match(/^(.+?)(?:\s*\||\s*-\s*|$)/);
-              if (providerMatch) {
-                gameInfo.provider = providerMatch[1].trim();
+            const extractedTitle = match[1].trim();
+            // Validate the extracted title before using it
+            if (isValidGameTitle(extractedTitle)) {
+              gameInfo.title = extractedTitle;
+              if (match[2]) {
+                // Try to extract provider
+                const providerMatch = match[2].match(/^(.+?)(?:\s*\||\s*-\s*|$)/);
+                if (providerMatch) {
+                  gameInfo.provider = providerMatch[1].trim();
+                }
               }
+              gameInfo.source = 'page-title';
+              break;
             }
-            gameInfo.source = 'page-title';
-            break;
           }
         }
       }
@@ -359,7 +430,7 @@
         // Simple heuristic: if title doesn't contain common non-game words, assume it's a game
         const commonWords = ['login', 'register', 'deposit', 'withdraw', 'account', 'help', 'support'];
         const lowerTitle = pageTitle.toLowerCase();
-        if (!commonWords.some(word => lowerTitle.includes(word))) {
+        if (!commonWords.some(word => lowerTitle.includes(word)) && isValidGameTitle(pageTitle)) {
           gameInfo.title = pageTitle;
           gameInfo.source = 'page-title-fallback';
         }
@@ -383,9 +454,12 @@
               if (casino === 'cryptocasino' && text.match(/^Play\s+/i)) {
                 text = text.replace(/^Play\s+/i, '').trim();
               }
-              gameInfo.title = text;
-              gameInfo.source = 'dom-selector';
-              break;
+              // Validate the extracted title
+              if (isValidGameTitle(text)) {
+                gameInfo.title = text;
+                gameInfo.source = 'dom-selector';
+                break;
+              }
             }
           }
         } catch (e) {
@@ -406,9 +480,12 @@
               if (casino === 'cryptocasino' && content.match(/^Play\s+/i)) {
                 content = content.replace(/^Play\s+/i, '').trim();
               }
-              gameInfo.title = content;
-              gameInfo.source = 'meta-tag';
-              break;
+              // Validate the extracted title
+              if (isValidGameTitle(content)) {
+                gameInfo.title = content;
+                gameInfo.source = 'meta-tag';
+                break;
+              }
             }
           }
         } catch (e) {

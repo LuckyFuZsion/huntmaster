@@ -149,13 +149,16 @@ function displayGameInfo(gameInfo) {
   );
   
   // Auto-fill stake and win amounts if detected, but only if user hasn't manually edited them
+  // Only update stake if the new game has a detected stake value, otherwise keep existing stake
   if (gameInfo.stake !== null && gameInfo.stake !== undefined && !userEditedStakeAmount) {
     const stakeInput = document.getElementById('stake-amount');
-    // Only auto-fill if field is empty or matches the previous detected value
-    if (!stakeInput.value || stakeInput.value === '') {
+    // Only auto-fill if field is empty (0 or blank), otherwise keep the existing stake
+    const currentStake = parseFloat(stakeInput.value) || 0;
+    if (currentStake === 0 || stakeInput.value === '' || stakeInput.value === '0') {
       stakeInput.value = gameInfo.stake;
       updateXWin();
     }
+    // If stake already has a value, keep it (don't overwrite with detected value)
   }
   if (gameInfo.winAmount !== null && gameInfo.winAmount !== undefined && !userEditedWinAmount) {
     const winInput = document.getElementById('win-amount');
@@ -290,6 +293,7 @@ async function recordWin() {
       // Clear win amount (keep stake for next round)
       document.getElementById('win-amount').value = '';
       userEditedWinAmount = false; // Reset edit flag after successful save
+      // Keep stake value - don't clear it
       updateXWin();
     } else {
       // Show detailed error message
@@ -445,7 +449,7 @@ async function addToHunt() {
       const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
       console.log('Showing success message:', successMessage);
       showStatus(successMessage, 'success', 'hunt-status'); // Show in hunt-status element
-      stakeInput.value = ''; // Clear the stake input
+      // Keep stake value - don't clear it so it persists for next game
     } else {
       throw new Error(saveData.error || 'Failed to add game to hunt list');
     }
@@ -536,6 +540,307 @@ async function toggleTabLock() {
   }
 }
 
+// Collect Bonuses View Management
+let currentCollectSlot = null;
+let allSlots = [];
+let currentCollectIndex = -1; // Track current position in slots array
+
+function showCollectBonusesView() {
+  // Hide main sections
+  document.querySelectorAll('.section').forEach(section => {
+    if (section.id !== 'collect-bonuses-section') {
+      section.style.display = 'none';
+    }
+  });
+  
+  // Show collect bonuses section and back button
+  document.getElementById('collect-bonuses-section').style.display = 'block';
+  document.getElementById('collect-bonuses-btn').style.display = 'none';
+  document.getElementById('back-to-main-btn').style.display = 'block';
+  
+  // Load first slot without win
+  loadNextCollectSlot();
+}
+
+function showMainView() {
+  // Show all main sections
+  document.querySelectorAll('.section').forEach(section => {
+    if (section.id !== 'collect-bonuses-section') {
+      section.style.display = 'block';
+    }
+  });
+  
+  // Hide collect bonuses section
+  document.getElementById('collect-bonuses-section').style.display = 'none';
+  document.getElementById('collect-bonuses-btn').style.display = 'block';
+  document.getElementById('back-to-main-btn').style.display = 'none';
+  
+  // Reset state
+  currentCollectSlot = null;
+  allSlots = [];
+}
+
+// Load the next slot that needs a win
+async function loadNextCollectSlot() {
+  const { apiBaseUrl, sessionToken } = await loadConfig();
+  
+  if (!sessionToken) {
+    showStatus('Please configure your session token first', 'error', 'collect-status');
+    return;
+  }
+
+  const loadingEl = document.getElementById('collect-loading');
+  const completeEl = document.getElementById('collect-complete');
+  const gameInfoEl = document.getElementById('collect-game-info');
+  const statusEl = document.getElementById('collect-status');
+  
+  loadingEl.style.display = 'block';
+  completeEl.style.display = 'none';
+  gameInfoEl.style.display = 'none';
+  statusEl.textContent = '';
+
+  try {
+    // Fetch all slots
+    const response = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: sessionToken, action: 'get' })
+    });
+
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to load slots');
+    }
+
+    allSlots = data.slots || [];
+    
+    // Find slots without wins
+    const slotsWithoutWin = allSlots.filter(slot => 
+      slot.win === null || slot.win === undefined || slot.win === 0
+    );
+
+    if (slotsWithoutWin.length === 0) {
+      // All bonuses collected
+      loadingEl.style.display = 'none';
+      completeEl.style.display = 'block';
+      gameInfoEl.style.display = 'none';
+      currentCollectIndex = -1;
+      currentCollectSlot = null;
+      return;
+    }
+
+    // If we're going forward (or first load), move to next index
+    // If going back, we'll handle that separately in goBackCollectBonus
+    if (currentCollectIndex < 0) {
+      currentCollectIndex = 0; // Start at first slot without win
+    } else if (currentCollectIndex < slotsWithoutWin.length - 1) {
+      currentCollectIndex++; // Move forward to next slot
+    } else {
+      // Already at last slot, stay there
+      currentCollectIndex = slotsWithoutWin.length - 1;
+    }
+
+    currentCollectSlot = slotsWithoutWin[currentCollectIndex];
+    
+    // Display slot info
+    document.getElementById('collect-game-name').textContent = currentCollectSlot.name;
+    document.getElementById('collect-game-stake').textContent = currentCollectSlot.bet ? currentCollectSlot.bet.toFixed(2) : '0.00';
+    
+    // Clear win input
+    document.getElementById('collect-win-amount').value = '';
+    
+    // Fetch game thumbnail
+    await loadGameThumbnail(currentCollectSlot.name);
+    
+    loadingEl.style.display = 'none';
+    gameInfoEl.style.display = 'block';
+    
+  } catch (error) {
+    console.error('Error loading slots:', error);
+    loadingEl.style.display = 'none';
+    showStatus(`Error: ${error.message}`, 'error', 'collect-status');
+  }
+}
+
+// Load game thumbnail
+async function loadGameThumbnail(gameName) {
+  const { apiBaseUrl, sessionToken } = await loadConfig();
+  const thumbnailEl = document.getElementById('collect-game-thumbnail');
+  
+  try {
+    // Search for game to get thumbnail
+    const searchUrl = new URL(`${apiBaseUrl}/api/slots-suggest`);
+    searchUrl.searchParams.set('q', gameName);
+    searchUrl.searchParams.set('limit', '1');
+    if (sessionToken) {
+      searchUrl.searchParams.set('session', sessionToken);
+    }
+    
+    const response = await fetch(searchUrl.toString());
+    const data = await response.json();
+    
+    if (data.success && data.data && data.data.length > 0) {
+      const game = data.data[0];
+      if (game.thumbnail) {
+        // Use image proxy to avoid CORS issues
+        thumbnailEl.src = `${apiBaseUrl}/api/image-proxy?url=${encodeURIComponent(game.thumbnail)}`;
+        thumbnailEl.style.display = 'block';
+        thumbnailEl.onerror = () => {
+          thumbnailEl.style.display = 'none';
+        };
+      } else {
+        thumbnailEl.style.display = 'none';
+      }
+    } else {
+      thumbnailEl.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Error loading thumbnail:', error);
+    thumbnailEl.style.display = 'none';
+  }
+}
+
+// Save win for current slot
+async function saveCollectWin() {
+  const { apiBaseUrl, sessionToken } = await loadConfig();
+  
+  if (!sessionToken) {
+    showStatus('Please configure your session token first', 'error', 'collect-status');
+    return;
+  }
+
+  if (!currentCollectSlot) {
+    showStatus('No slot selected', 'error', 'collect-status');
+    return;
+  }
+
+  const winAmount = parseFloat(document.getElementById('collect-win-amount').value);
+  
+  if (isNaN(winAmount) || winAmount < 0) {
+    showStatus('Please enter a valid win amount', 'error', 'collect-status');
+    return;
+  }
+
+  const saveBtn = document.getElementById('save-collect-win-btn');
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span>Saving...</span>';
+
+  try {
+    // Update the slot with the win amount
+    const updatedSlot = {
+      id: currentCollectSlot.id,
+      name: currentCollectSlot.name,
+      bet: currentCollectSlot.bet,
+      win: winAmount
+    };
+
+    const response = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'update-single',
+        slot: updatedSlot
+      })
+    });
+
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to save win');
+    }
+
+    // Calculate X win
+    const xWin = currentCollectSlot.bet > 0 ? (winAmount / currentCollectSlot.bet).toFixed(2) : '0.00';
+    showStatus(`✓ Win saved! ${winAmount.toFixed(2)} (${xWin}x)`, 'success', 'collect-status');
+    
+    // Wait a moment then load next slot
+    setTimeout(() => {
+      loadNextCollectSlot();
+    }, 1000);
+    
+  } catch (error) {
+    console.error('Error saving win:', error);
+    showStatus(`Error: ${error.message}`, 'error', 'collect-status');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<span>💾 Save Win</span>';
+  }
+}
+
+// Go back to previous bonus
+async function goBackCollectBonus() {
+  const slotsWithoutWin = allSlots.filter(slot => 
+    slot.win === null || slot.win === undefined || slot.win === 0
+  );
+  
+  if (currentCollectIndex > 0) {
+    currentCollectIndex--; // Move back one position
+    
+    if (currentCollectIndex >= 0 && currentCollectIndex < slotsWithoutWin.length) {
+      currentCollectSlot = slotsWithoutWin[currentCollectIndex];
+      
+      // Display slot info
+      document.getElementById('collect-game-name').textContent = currentCollectSlot.name;
+      document.getElementById('collect-game-stake').textContent = currentCollectSlot.bet ? currentCollectSlot.bet.toFixed(2) : '0.00';
+      
+      // Clear win input
+      document.getElementById('collect-win-amount').value = '';
+      
+      // Fetch game thumbnail
+      await loadGameThumbnail(currentCollectSlot.name);
+      
+      // Show game info
+      document.getElementById('collect-game-info').style.display = 'block';
+      document.getElementById('collect-loading').style.display = 'none';
+      document.getElementById('collect-complete').style.display = 'none';
+      document.getElementById('collect-status').textContent = '';
+    }
+  } else {
+    showStatus('Already at first bonus', 'info', 'collect-status');
+  }
+}
+
+// Go forward to next bonus
+async function forwardCollectBonus() {
+  const slotsWithoutWin = allSlots.filter(slot => 
+    slot.win === null || slot.win === undefined || slot.win === 0
+  );
+  
+  if (currentCollectIndex < slotsWithoutWin.length - 1) {
+    currentCollectIndex++; // Move forward one position
+    
+    if (currentCollectIndex >= 0 && currentCollectIndex < slotsWithoutWin.length) {
+      currentCollectSlot = slotsWithoutWin[currentCollectIndex];
+      
+      // Display slot info
+      document.getElementById('collect-game-name').textContent = currentCollectSlot.name;
+      document.getElementById('collect-game-stake').textContent = currentCollectSlot.bet ? currentCollectSlot.bet.toFixed(2) : '0.00';
+      
+      // Clear win input
+      document.getElementById('collect-win-amount').value = '';
+      
+      // Fetch game thumbnail
+      await loadGameThumbnail(currentCollectSlot.name);
+      
+      // Show game info
+      document.getElementById('collect-game-info').style.display = 'block';
+      document.getElementById('collect-loading').style.display = 'none';
+      document.getElementById('collect-complete').style.display = 'none';
+      document.getElementById('collect-status').textContent = '';
+    }
+  } else {
+    showStatus('Already at last bonus', 'info', 'collect-status');
+  }
+}
+
+// Skip current bonus
+async function skipCollectBonus() {
+  // Just move to next slot
+  loadNextCollectSlot();
+}
+
 // Update lock status display
 async function updateLockStatus() {
   const lockBtn = document.getElementById('lock-tab-btn');
@@ -613,6 +918,20 @@ async function openInWindow() {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize stake to empty/0 on load to prevent random values
+  const stakeInput = document.getElementById('stake-amount');
+  const winInput = document.getElementById('win-amount');
+  
+  // Ensure stake starts at 0 if empty (prevents random values)
+  if (!stakeInput.value || stakeInput.value.trim() === '') {
+    stakeInput.value = '0';
+  }
+  
+  // Ensure win amount starts empty
+  if (!winInput.value || winInput.value.trim() === '') {
+    winInput.value = '';
+  }
+  
   await loadConfig();
   await detectGame();
 
@@ -729,6 +1048,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Check lock status on load
   updateLockStatus();
+
+  // Collect Bonuses functionality
+  document.getElementById('collect-bonuses-btn').addEventListener('click', showCollectBonusesView);
+  document.getElementById('back-to-main-btn').addEventListener('click', showMainView);
+  document.getElementById('save-collect-win-btn').addEventListener('click', saveCollectWin);
+  document.getElementById('skip-collect-btn').addEventListener('click', skipCollectBonus);
+  document.getElementById('back-collect-btn').addEventListener('click', goBackCollectBonus);
+  document.getElementById('forward-collect-btn').addEventListener('click', forwardCollectBonus);
+  document.getElementById('dashboard-collect-btn').addEventListener('click', showMainView);
 });
 
 

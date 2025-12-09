@@ -47,13 +47,47 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 flex items-center justify-center">
-        <Card className="w-[350px]">
+      <div 
+        className="min-h-screen flex items-center justify-center relative"
+        style={{
+          background: 'linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%)',
+        }}
+      >
+        <style jsx>{`
+          div::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+              linear-gradient(rgba(74, 158, 255, 0.03) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(74, 158, 255, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            pointer-events: none;
+            z-index: 0;
+          }
+          div::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(74, 158, 255, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            opacity: 0.3;
+            z-index: 0;
+          }
+        `}</style>
+        <Card className="w-[350px] relative z-10 bg-[rgba(26,26,46,0.6)] backdrop-blur-lg border-[rgba(74,158,255,0.2)]">
           <CardHeader>
-            <CardTitle className="text-2xl text-center">Loading...</CardTitle>
+            <CardTitle className="text-2xl text-center text-white">Loading...</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-center text-muted-foreground">Initializing application...</p>
+            <p className="text-center text-[#8b9dc3]">Initializing application...</p>
           </CardContent>
         </Card>
       </div>
@@ -61,8 +95,48 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 flex items-center justify-center">
-      <div className="absolute top-4 right-4">
+    <div 
+      className="min-h-screen relative"
+      style={{
+        background: 'linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%)',
+      }}
+    >
+      <style dangerouslySetInnerHTML={{__html: `
+        body {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          margin: 0;
+          padding: 0;
+        }
+        .extension-theme-bg::before {
+          content: '';
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-image: 
+            linear-gradient(rgba(74, 158, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(74, 158, 255, 0.03) 1px, transparent 1px);
+          background-size: 20px 20px;
+          pointer-events: none;
+          z-index: 0;
+        }
+        .extension-theme-bg::after {
+          content: '';
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: radial-gradient(circle, rgba(74, 158, 255, 0.1) 1px, transparent 1px);
+          background-size: 50px 50px;
+          pointer-events: none;
+          opacity: 0.3;
+          z-index: 0;
+        }
+      `}} />
+      <div className="extension-theme-bg fixed inset-0"></div>
+      <div className="absolute top-4 right-4 z-[5]">
         <VersionHistory />
       </div>
       <BonusHuntTracker />

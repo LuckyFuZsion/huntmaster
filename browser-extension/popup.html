@@ -619,6 +619,25 @@
         0 6px 25px rgba(255, 107, 107, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
     }
+
+    #collect-game-thumbnail {
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+
+    #save-collect-win-btn {
+      background: linear-gradient(135deg, #9ad97a 0%, #7bc87a 100%);
+      box-shadow: 
+        0 4px 15px rgba(154, 217, 122, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    
+    #save-collect-win-btn:hover {
+      background: linear-gradient(135deg, #aae98a 0%, #8bd88a 100%);
+      box-shadow: 
+        0 6px 25px rgba(154, 217, 122, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -667,7 +686,50 @@
       <div id="hunt-status" class="status"></div>
     </div>
 
+    <div class="section" id="collect-bonuses-section" style="display: none;">
+      <div class="section-title">Collect Bonuses</div>
+      <div id="collect-bonuses-content">
+        <div class="game-info" id="collect-game-info" style="display: none;">
+          <div style="text-align: center; margin-bottom: 16px;">
+            <img id="collect-game-thumbnail" src="" alt="Game thumbnail" style="width: 100%; max-width: 200px; height: auto; border-radius: 8px; margin: 0 auto; display: block;" />
+          </div>
+          <div class="game-info-line">
+            <span class="game-info-label">Game</span>
+            <span class="game-info-value" id="collect-game-name">-</span>
+          </div>
+          <div class="game-info-line">
+            <span class="game-info-label">Stake</span>
+            <span class="game-info-value" id="collect-game-stake">-</span>
+          </div>
+        </div>
+        <div class="win-recording-grid">
+          <div>
+            <label>Win Amount</label>
+            <input type="number" id="collect-win-amount" placeholder="0.00" step="0.01" min="0" />
+          </div>
+        </div>
+        <button id="save-collect-win-btn"><span>💾 Save Win</span></button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button id="back-collect-btn" class="secondary" style="flex: 1;"><span>⬅️ Back</span></button>
+          <button id="forward-collect-btn" class="secondary" style="flex: 1;"><span>➡️ Forward</span></button>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button id="skip-collect-btn" class="secondary" style="flex: 1;"><span>⏭️ Skip</span></button>
+          <button id="dashboard-collect-btn" class="secondary" style="flex: 1;"><span>📊 Dashboard</span></button>
+        </div>
+        <div id="collect-status" class="status"></div>
+        <div id="collect-loading" class="status info" style="display: none;">
+          <span class="loading"></span>Loading next bonus...
+        </div>
+        <div id="collect-complete" class="status success" style="display: none;">
+          ✓ All bonuses collected!
+        </div>
+      </div>
+    </div>
+
     <div class="section">
+      <button id="collect-bonuses-btn" class="secondary" style="margin-bottom: 20px;"><span>🎰 Collect Bonuses</span></button>
+      <button id="back-to-main-btn" class="secondary" style="display: none; margin-bottom: 20px;"><span>← Back to Main</span></button>
       <div class="section-title">Win Recording</div>
       <div class="win-recording-grid">
         <div>
