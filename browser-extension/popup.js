@@ -437,9 +437,14 @@ async function addToHunt() {
     });
 
     const saveData = await saveResponse.json();
+    console.log('Save response:', saveData);
 
     if (saveData.success) {
-      showStatus(`✓ "${gameTitle}" added to hunt at ${stake} stake`, 'success');
+      // Format stake to 2 decimal places
+      const formattedStake = stake.toFixed(2);
+      const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
+      console.log('Showing success message:', successMessage);
+      showStatus(successMessage, 'success');
       stakeInput.value = ''; // Clear the stake input
     } else {
       throw new Error(saveData.error || 'Failed to add game to hunt list');
@@ -499,19 +504,24 @@ async function clearCurrentGame() {
 // Show status message
 function showStatus(message, type = 'info') {
   const statusEl = document.getElementById('status');
-  if (message) {
+  console.log('showStatus called:', message, type, 'Element:', statusEl);
+  if (message && statusEl) {
     statusEl.textContent = message;
     statusEl.className = `status ${type}`;
     
     if (type === 'success' || type === 'error') {
       setTimeout(() => {
-        statusEl.textContent = '';
-        statusEl.className = 'status';
-      }, 3000);
+        if (statusEl) {
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+        }
+      }, 5000); // Increased from 3000 to 5000ms to ensure message is visible
     }
   } else {
-    statusEl.textContent = '';
-    statusEl.className = 'status';
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'status';
+    }
   }
 }
 
