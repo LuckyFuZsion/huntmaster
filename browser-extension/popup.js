@@ -355,6 +355,103 @@ async function updateCurrentGame(gameTitle, provider) {
   }
 }
 
+// Add current game to bonus hunt list
+async function addToHunt() {
+  const { apiBaseUrl, sessionToken } = await loadConfig();
+  
+  if (!sessionToken) {
+    showStatus('Please configure your session token first', 'error');
+    return;
+  }
+
+  const gameTitle = document.getElementById('detected-game').textContent.trim();
+  const stakeInput = document.getElementById('hunt-stake');
+  const stake = parseFloat(stakeInput.value);
+  
+  // Validate inputs
+  if (!gameTitle || gameTitle === 'Detecting...' || gameTitle === 'Not detected' || gameTitle === '') {
+    showStatus('Please wait for game detection or edit the game title', 'error');
+    return;
+  }
+  
+  if (isNaN(stake) || stake <= 0) {
+    showStatus('Please enter a valid stake amount', 'error');
+    stakeInput.focus();
+    return;
+  }
+
+  const addBtn = document.getElementById('add-to-hunt-btn');
+  addBtn.disabled = true;
+  addBtn.innerHTML = '<span>Adding...</span>';
+
+  try {
+    // Step 1: Get current slots
+    const getResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'get'
+      })
+    });
+
+    const getData = await getResponse.json();
+    
+    if (!getData.success) {
+      throw new Error(getData.error || 'Failed to get current slots');
+    }
+
+    const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
+    
+    // Step 2: Check if game already exists in the list
+    const gameExists = currentSlots.some(slot => 
+      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
+      Number(slot.bet) === stake
+    );
+    
+    if (gameExists) {
+      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error');
+      addBtn.disabled = false;
+      addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
+      return;
+    }
+
+    // Step 3: Add new slot to the list
+    const newSlot = {
+      name: gameTitle,
+      bet: stake,
+      win: null // No win yet
+    };
+    
+    const updatedSlots = [...currentSlots, newSlot];
+
+    // Step 4: Save all slots
+    const saveResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'save',
+        slots: updatedSlots
+      })
+    });
+
+    const saveData = await saveResponse.json();
+
+    if (saveData.success) {
+      showStatus(`✓ "${gameTitle}" added to hunt at ${stake} stake`, 'success');
+      stakeInput.value = ''; // Clear the stake input
+    } else {
+      throw new Error(saveData.error || 'Failed to add game to hunt list');
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+  } finally {
+    addBtn.disabled = false;
+    addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
+  }
+}
+
 // Clear current game
 async function clearCurrentGame() {
   const { apiBaseUrl, sessionToken } = await loadConfig();
@@ -540,6 +637,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Record win button
   document.getElementById('record-win-btn').addEventListener('click', recordWin);
+
+  // Add to hunt button
+  document.getElementById('add-to-hunt-btn').addEventListener('click', addToHunt);
 
   // Update user info when session token field changes
   document.getElementById('session-token').addEventListener('input', (e) => {
