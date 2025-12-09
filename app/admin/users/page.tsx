@@ -20,6 +20,7 @@ interface User {
   discordId?: string
   email?: string
   isActive?: boolean
+  planExpiresAt?: string | null
 }
 
 // Helper to get admin status from either field
@@ -43,6 +44,7 @@ export default function AdminDashboard() {
   const [editedUsername, setEditedUsername] = useState("")
   const [editedPassword, setEditedPassword] = useState("")
   const [editedIsAdmin, setEditedIsAdmin] = useState(false)
+  const [editedPlanExpiresAt, setEditedPlanExpiresAt] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [newUsername, setNewUsername] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -93,6 +95,18 @@ export default function AdminDashboard() {
     setEditedUsername(user.username)
     setEditedPassword("")
     setEditedIsAdmin(getIsAdmin(user))
+    // Format date for datetime-local input (YYYY-MM-DDTHH:mm)
+    if (user.planExpiresAt) {
+      const date = new Date(user.planExpiresAt)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      setEditedPlanExpiresAt(`${year}-${month}-${day}T${hours}:${minutes}`)
+    } else {
+      setEditedPlanExpiresAt("")
+    }
     setIsEditDialogOpen(true)
   }
 
@@ -175,6 +189,7 @@ export default function AdminDashboard() {
           username: editedUsername,
           password: editedPassword || undefined,
           is_admin: editedIsAdmin,
+          planExpiresAt: editedPlanExpiresAt === "" ? null : editedPlanExpiresAt,
         }),
       })
 
@@ -271,6 +286,21 @@ export default function AdminDashboard() {
                                 <span className="text-gray-400">Admin:</span>
                                 <span className="text-white">{isUserAdmin ? "Yes" : "No"}</span>
                               </div>
+                              {user.planExpiresAt && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-400">Plan Expires:</span>
+                                  <span className={`text-sm ${
+                                    new Date(user.planExpiresAt) < new Date() 
+                                      ? 'text-red-400' 
+                                      : new Date(user.planExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000
+                                      ? 'text-yellow-400'
+                                      : 'text-green-400'
+                                  }`}>
+                                    {new Date(user.planExpiresAt).toLocaleDateString()}
+                                    {new Date(user.planExpiresAt) < new Date() && ' (Expired)'}
+                                  </span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-2">
                                 <span className="text-gray-400">Status:</span>
                                 <span className={`px-2 py-1 rounded text-xs border ${
@@ -342,6 +372,7 @@ export default function AdminDashboard() {
                 <TableHead className="min-w-[150px] hidden sm:table-cell">Email</TableHead>
                 <TableHead className="min-w-[60px]">Admin</TableHead>
                 <TableHead className="min-w-[80px]">Status</TableHead>
+                <TableHead className="min-w-[120px]">Plan Expires</TableHead>
                 <TableHead className="min-w-[200px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -368,6 +399,22 @@ export default function AdminDashboard() {
                     }`}>
                       {isActive ? "Active" : "Inactive"}
                     </span>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {user.planExpiresAt ? (
+                      <span className={
+                        new Date(user.planExpiresAt) < new Date() 
+                          ? 'text-red-400' 
+                          : new Date(user.planExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000
+                          ? 'text-yellow-400'
+                          : 'text-green-400'
+                      }>
+                        {new Date(user.planExpiresAt).toLocaleDateString()}
+                        {new Date(user.planExpiresAt) < new Date() && ' (Expired)'}
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">No expiration</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
@@ -461,6 +508,20 @@ export default function AdminDashboard() {
                 className="rounded border-gray-300"
               />
               <label htmlFor="is-admin">Admin User</label>
+            </div>
+            <div className="space-y-2">
+              <label>Plan Expiration Date (leave blank for no expiration)</label>
+              <Input
+                type="datetime-local"
+                value={editedPlanExpiresAt}
+                onChange={(e) => setEditedPlanExpiresAt(e.target.value)}
+                placeholder="No expiration"
+              />
+              {editedPlanExpiresAt && (
+                <p className="text-sm text-gray-400">
+                  Expires: {new Date(editedPlanExpiresAt).toLocaleString()}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>

@@ -43,7 +43,7 @@ export async function PUT(request: Request) {
       )
     }
 
-    const { username, password, is_admin, huntmaster, huntmaster_admin } = await request.json()
+    const { username, password, is_admin, huntmaster, huntmaster_admin, planExpiresAt } = await request.json()
 
     // Build update data
     const updateData: any = {
@@ -57,6 +57,13 @@ export async function PUT(request: Request) {
     }
     if (huntmaster_admin !== undefined) {
       updateData.huntmasterAdmin = huntmaster_admin
+    }
+
+    // Handle plan expiration
+    if (planExpiresAt !== undefined) {
+      updateData.planExpiresAt = planExpiresAt === null || planExpiresAt === "" 
+        ? null 
+        : new Date(planExpiresAt).toISOString()
     }
 
     // If password is provided, hash and update it

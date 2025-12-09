@@ -21,9 +21,10 @@ export async function GET(request: Request) {
     // Get user's current usage
     const usage = await supabaseAdmin.apiUsage.getUsage(userId);
 
-    // Get user info to show limit
+    // Get user info to show limit and plan expiration
     const user = await supabaseAdmin.users.findOne(userId);
     const monthlyLimit = user?.apiMonthlyLimit ?? null;
+    const planExpiresAt = user?.planExpiresAt ?? null;
 
     // Calculate percentage used
     const percentageUsed = monthlyLimit 
@@ -52,7 +53,8 @@ export async function GET(request: Request) {
         daysRemaining: daysRemaining,
         dailyAverage: Math.round(dailyAverage),
         projectedUsage: projectedUsage,
-        willExceedLimit: monthlyLimit ? projectedUsage > monthlyLimit : false
+        willExceedLimit: monthlyLimit ? projectedUsage > monthlyLimit : false,
+        planExpiresAt: planExpiresAt ? (typeof planExpiresAt === 'string' ? planExpiresAt : planExpiresAt.toISOString()) : null
       }
     });
   } catch (error: any) {

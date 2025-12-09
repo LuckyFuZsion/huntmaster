@@ -31,6 +31,7 @@ interface UsageData {
   dailyAverage: number;
   projectedUsage: number;
   willExceedLimit: boolean;
+  planExpiresAt: string | null;
 }
 
 export default function AccountPage() {
@@ -277,6 +278,49 @@ export default function AccountPage() {
                 </CardContent>
               </Link>
             </Card>
+
+            {/* Plan Expiration Card */}
+            {usage.planExpiresAt && (
+              <Card className={`bg-gradient-to-br ${new Date(usage.planExpiresAt) < new Date() ? 'from-red-950 to-red-900 border-red-800' : new Date(usage.planExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000 ? 'from-amber-950 to-amber-900 border-amber-800' : 'from-green-950 to-green-900 border-green-800'} md:col-span-2`}>
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Calendar className="w-5 h-5" />
+                    Subscription Plan
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {new Date(usage.planExpiresAt) < new Date() ? (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription className="font-semibold">
+                        Your subscription has expired. Please contact an administrator to renew your access.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-300">Plan Expires:</span>
+                        <span className="text-white font-semibold">
+                          {new Date(usage.planExpiresAt).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          })}
+                        </span>
+                      </div>
+                      {new Date(usage.planExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000 && (
+                        <Alert>
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>
+                            Your subscription expires in {Math.ceil((new Date(usage.planExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000))} days. Please contact an administrator to renew.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Info Card */}
             <Card className="bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700 md:col-span-2">
