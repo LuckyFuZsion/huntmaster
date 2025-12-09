@@ -360,7 +360,7 @@ async function addToHunt() {
   const { apiBaseUrl, sessionToken } = await loadConfig();
   
   if (!sessionToken) {
-    showStatus('Please configure your session token first', 'error');
+    showStatus('Please configure your session token first', 'error', 'hunt-status');
     return;
   }
 
@@ -370,12 +370,12 @@ async function addToHunt() {
   
   // Validate inputs
   if (!gameTitle || gameTitle === 'Detecting...' || gameTitle === 'Not detected' || gameTitle === '') {
-    showStatus('Please wait for game detection or edit the game title', 'error');
+    showStatus('Please wait for game detection or edit the game title', 'error', 'hunt-status');
     return;
   }
   
   if (isNaN(stake) || stake <= 0) {
-    showStatus('Please enter a valid stake amount', 'error');
+    showStatus('Please enter a valid stake amount', 'error', 'hunt-status');
     stakeInput.focus();
     return;
   }
@@ -410,7 +410,7 @@ async function addToHunt() {
     );
     
     if (gameExists) {
-      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error');
+      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error', 'hunt-status');
       addBtn.disabled = false;
       addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
       return;
@@ -444,13 +444,13 @@ async function addToHunt() {
       const formattedStake = stake.toFixed(2);
       const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
       console.log('Showing success message:', successMessage);
-      showStatus(successMessage, 'success');
+      showStatus(successMessage, 'success', 'hunt-status'); // Show in hunt-status element
       stakeInput.value = ''; // Clear the stake input
     } else {
       throw new Error(saveData.error || 'Failed to add game to hunt list');
     }
   } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error');
+    showStatus(`Error: ${error.message}`, 'error', 'hunt-status'); // Show errors in hunt-status too
   } finally {
     addBtn.disabled = false;
     addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
@@ -502,9 +502,9 @@ async function clearCurrentGame() {
 }
 
 // Show status message
-function showStatus(message, type = 'info') {
-  const statusEl = document.getElementById('status');
-  console.log('showStatus called:', message, type, 'Element:', statusEl);
+function showStatus(message, type = 'info', targetElementId = 'status') {
+  const statusEl = document.getElementById(targetElementId);
+  console.log('showStatus called:', message, type, 'Element:', statusEl, 'Target:', targetElementId);
   if (message && statusEl) {
     statusEl.textContent = message;
     statusEl.className = `status ${type}`;
