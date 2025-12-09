@@ -246,7 +246,7 @@ async function autoUpdateCurrentGame(gameInfo) {
       body: JSON.stringify({
         session: sessionToken,
         gameTitle: gameTitleTrimmed,
-        provider: gameInfo.provider?.trim() || undefined,
+        // Provider removed - only updating game names
       }),
     });
     

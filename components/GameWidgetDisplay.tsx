@@ -458,9 +458,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
             }
           })()}
         </div>
-        {(effectiveProvider || game?.provider) && (
-          <div style={{ color: "#aaa", fontSize: Math.max(20, size * 0.125), lineHeight: 1.2, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveProvider || game?.provider || ""}</div>
-        )}
+        {/* Provider/casino name removed - only showing game name */}
         {/* Screen 1: Best Wins */}
         {showBestWins && (
           <>
