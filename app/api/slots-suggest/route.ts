@@ -73,11 +73,10 @@ export async function GET(request: Request) {
     // This was preventing searches from getting all matching games from external APIs
     // Users should be able to search and see all available games, not just ones in their slots
 
-    // Skip cache for browser extension requests (when session token is provided)
-    // Browser extension needs fresh results and doesn't need caching
-    const isBrowserExtension = !!userId; // If session token is provided, it's likely the browser extension
+    // Check cache for all requests (including browser extension)
+    // Cached requests don't count toward API usage limits
     const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
-    const cached = !isBrowserExtension ? getCached(cacheKey) : null
+    const cached = getCached(cacheKey)
     if (cached) {
       // Apply filtering to cached results to ensure they match the query
       // This fixes issues where cached results might be incomplete or from before filtering was added
@@ -106,6 +105,8 @@ export async function GET(request: Request) {
             }
           };
           console.log(`✅ Cache hit for slots-suggest: "${q}" (Filtered: ${cached.data.length} → ${filteredCached.length})`)
+          // IMPORTANT: Don't increment API usage for cached results
+          // Cached requests are free and don't count toward limits
           return NextResponse.json(filteredCachedResponse)
         }
       } else {
@@ -457,12 +458,11 @@ export async function GET(request: Request) {
       ...(warnings.length > 0 && { warnings, rateLimited: true })
     }
     
-    // Only cache for web app requests (not browser extension)
-    if (!isBrowserExtension) {
-      setCache(cacheKey, response)
-    }
+    // Cache all successful responses (including browser extension)
+    setCache(cacheKey, response)
     
-    // Increment user's API usage count (only if userId provided and API call was made)
+    // Increment user's API usage count (only if userId provided and actual API call was made)
+    // NOTE: This only runs if we didn't return early from cache, so cached requests don't increment
     if (userId) {
       try {
         const usage = await supabaseAdmin.apiUsage.increment(userId);
