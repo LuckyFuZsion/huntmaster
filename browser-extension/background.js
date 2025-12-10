@@ -202,20 +202,20 @@ async function autoUpdateCurrentGame(gameInfo) {
       }
     }
     
-    // IMPORTANT: Verify game exists in database before updating widget
-    // This ensures only recognized/valid games update the "now playing" widget
+    // Check if game exists in database (for logging/info purposes, but don't block update)
     const gameTitleTrimmed = gameInfo.title.trim();
-    console.log('[HuntMaster Extension] 🔍 Verifying game exists in database before updating:', gameTitleTrimmed);
+    console.log('[HuntMaster Extension] 🔍 Checking if game exists in database:', gameTitleTrimmed);
     const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken);
     
-    if (!gameExists) {
-      console.log('[HuntMaster Extension] ⚠️ Game NOT found in database - BLOCKING auto-update:', gameTitleTrimmed);
-      console.log('[HuntMaster Extension] 💡 Tip: Game must exist in database (slots, game_reviews, or slotslaunch_games) to auto-update widget');
-      return;
+    if (gameExists) {
+      console.log('[HuntMaster Extension] ✅ Game found in database - proceeding with auto-update');
+    } else {
+      console.log('[HuntMaster Extension] ⚠️ Game NOT found in database, but proceeding with auto-update anyway');
+      console.log('[HuntMaster Extension] 💡 Tip: Game will be updated even if not in database');
     }
     
-    // Game exists - update the current game via API
-    console.log('[HuntMaster Extension] ✅ Game VERIFIED in database - proceeding with auto-update:', gameTitleTrimmed);
+    // Update the current game via API (regardless of database check result)
+    console.log('[HuntMaster Extension] Proceeding with auto-update:', gameTitleTrimmed);
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
       method: 'POST',
       headers: {

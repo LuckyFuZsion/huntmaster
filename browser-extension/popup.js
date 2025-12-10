@@ -148,26 +148,8 @@ function displayGameInfo(gameInfo) {
     gameInfo.source || '-'
   );
   
-  // Auto-fill stake and win amounts if detected, but only if user hasn't manually edited them
-  // Only update stake if the new game has a detected stake value, otherwise keep existing stake
-  if (gameInfo.stake !== null && gameInfo.stake !== undefined && !userEditedStakeAmount) {
-    const stakeInput = document.getElementById('stake-amount');
-    // Only auto-fill if field is empty (0 or blank), otherwise keep the existing stake
-    const currentStake = parseFloat(stakeInput.value) || 0;
-    if (currentStake === 0 || stakeInput.value === '' || stakeInput.value === '0') {
-      stakeInput.value = gameInfo.stake;
-      updateXWin();
-    }
-    // If stake already has a value, keep it (don't overwrite with detected value)
-  }
-  if (gameInfo.winAmount !== null && gameInfo.winAmount !== undefined && !userEditedWinAmount) {
-    const winInput = document.getElementById('win-amount');
-    // Only auto-fill if field is empty or matches the previous detected value
-    if (!winInput.value || winInput.value === '') {
-      winInput.value = gameInfo.winAmount;
-      updateXWin();
-    }
-  }
+  // Disabled auto-fill of stake and win amounts to prevent random values from being detected
+  // Users should manually enter these values
 }
 
 function updateDetectedGame(title, provider, source) {
@@ -918,19 +900,13 @@ async function openInWindow() {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize stake to empty/0 on load to prevent random values
+  // Initialize stake and win amount fields to empty on load to prevent random values
   const stakeInput = document.getElementById('stake-amount');
   const winInput = document.getElementById('win-amount');
   
-  // Ensure stake starts at 0 if empty (prevents random values)
-  if (!stakeInput.value || stakeInput.value.trim() === '') {
-    stakeInput.value = '0';
-  }
-  
-  // Ensure win amount starts empty
-  if (!winInput.value || winInput.value.trim() === '') {
-    winInput.value = '';
-  }
+  // Ensure fields start completely empty (no default values)
+  stakeInput.value = '';
+  winInput.value = '';
   
   await loadConfig();
   await detectGame();

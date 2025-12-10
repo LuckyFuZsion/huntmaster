@@ -60,11 +60,42 @@
     return formatted;
   }
 
+  // Convert a slug like "pirates-plenty" into "Pirates Plenty"
+  function slugToTitle(slug) {
+    if (!slug) return null;
+    return slug
+      .split('-')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+      .trim();
+  }
+
+  // Parse bc.game URLs of the form https://bc.game/game/{game-slug}-by-{provider-slug}
+  function parseBcGameFromUrl(url) {
+    if (!url) return null;
+    const match = url.toLowerCase().match(/bc\.game\/game\/([^/?#]+)/);
+    if (!match || !match[1]) return null;
+
+    const slugPart = match[1];
+    const [gameSlug, providerSlug] = slugPart.split('-by-');
+    if (!gameSlug) return null;
+
+    const title = slugToTitle(gameSlug);
+    const provider = providerSlug ? formatProviderName(providerSlug.replace(/-/g, ' ')) : null;
+
+    if (!title) return null;
+    return { title, provider };
+  }
+
   // Casino-specific detection logic
   function detectCasino() {
     const hostname = window.location.hostname.toLowerCase();
     const url = window.location.href.toLowerCase();
     
+    if (hostname.includes('bc.game') || url.includes('bc.game/game')) {
+      return 'bcgame';
+    }
     if (hostname.includes('gamba') || url.includes('gamba')) {
       return 'gamba';
     }
@@ -78,6 +109,14 @@
 
   // Casino-specific title parsers
   function parseTitleForCasino(title, casino) {
+    if (casino === 'bcgame') {
+      // Prefer parsing directly from URL structure
+      const fromUrl = parseBcGameFromUrl(window.location.href);
+      if (fromUrl) {
+        return { title: fromUrl.title, provider: fromUrl.provider || null };
+      }
+    }
+
     if (casino === 'gamba') {
       // Gamba format: "Game Name by Provider Name - Play Online at Gamba"
       // Example: "Bangkok Hilton by Nolimit City - Play Online at Gamba"
@@ -386,6 +425,17 @@
 
     // Detect which casino site we're on
     const casino = detectCasino();
+
+    // For bc.game, parse directly from URL before trying titles/DOM
+    if (casino === 'bcgame') {
+      const bcGameInfo = parseBcGameFromUrl(window.location.href);
+      if (bcGameInfo && bcGameInfo.title && isValidGameTitle(bcGameInfo.title)) {
+        gameInfo.title = bcGameInfo.title;
+        gameInfo.provider = bcGameInfo.provider || null;
+        gameInfo.source = 'bcgame-url';
+        // Still fall through to allow additional data (stake/win) detection
+      }
+    }
     
     // Try title-based detection first
     const pageTitle = document.title.trim();
