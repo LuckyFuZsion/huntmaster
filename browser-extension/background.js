@@ -296,11 +296,48 @@ function handleMessage(message, sender, sendResponse, lockedTabId) {
         message.data.title !== 'Detecting...') {
       console.log('[HuntMaster Extension Background] Calling autoUpdateCurrentGame for:', message.data.title);
       autoUpdateCurrentGame(message.data);
+      
+      // Add to recent games cache (last 5 games)
+      chrome.storage.local.get(['recentGames'], (result) => {
+        let recentGames = result.recentGames || [];
+        
+        // Check if this game is already in the list (by title and provider)
+        const gameKey = `${message.data.title}|${message.data.provider || ''}`;
+        const existingIndex = recentGames.findIndex(g => 
+          `${g.title}|${g.provider || ''}` === gameKey
+        );
+        
+        if (existingIndex !== -1) {
+          // Remove existing entry to move it to the front
+          recentGames.splice(existingIndex, 1);
+        }
+        
+        // Add new game to the front with timestamp
+        const gameWithTime = {
+          title: message.data.title,
+          provider: message.data.provider || null,
+          detectedAt: Date.now()
+        };
+        recentGames.unshift(gameWithTime);
+        
+        // Keep only the last 5 games
+        recentGames = recentGames.slice(0, 5);
+        
+        // Store updated list
+        chrome.storage.local.set({ recentGames: recentGames });
+      });
     } else {
       console.log('[HuntMaster Extension Background] Skipping auto-update - invalid game data');
     }
     
     sendResponse({ success: true });
+    return;
+  }
+  
+  if (message.type === 'GET_RECENT_GAMES') {
+    chrome.storage.local.get(['recentGames'], (result) => {
+      sendResponse({ recentGames: result.recentGames || [] });
+    });
     return;
   }
   

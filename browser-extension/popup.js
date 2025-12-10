@@ -89,6 +89,17 @@ async function saveConfig() {
   }
 }
 
+// Simple validator for a detected game
+function isValidGame(game) {
+  return (
+    game &&
+    game.title &&
+    game.title !== 'Not detected' &&
+    game.title !== 'Detecting...' &&
+    game.title.trim() !== ''
+  );
+}
+
 // Detect game from current tab
 async function detectGame() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -102,27 +113,42 @@ async function detectGame() {
   try {
     chrome.tabs.sendMessage(tab.id, { type: 'HUNTMASTER_GET_GAME_INFO' }, (response) => {
       if (chrome.runtime.lastError) {
-        // Content script might not be loaded, try storage
+        // Content script might not be loaded, try storage but don't clear UI
         chrome.storage.local.get(['lastDetectedGame'], (result) => {
-          if (result.lastDetectedGame) {
-            displayGameInfo(result.lastDetectedGame);
+          const last = result.lastDetectedGame;
+          if (isValidGame(last)) {
+            displayGameInfo(last);
           } else {
             showStatus('No game detected on this page', 'info');
-            updateDetectedGame('No game detected', '-', '-');
+            // Keep previously shown game; do not clear
           }
         });
       } else if (response && response.gameInfo) {
-        displayGameInfo(response.gameInfo);
+        // Only update if valid; otherwise keep last valid game
+        if (isValidGame(response.gameInfo)) {
+          displayGameInfo(response.gameInfo);
+        } else {
+          chrome.storage.local.get(['lastDetectedGame'], (result) => {
+            const last = result.lastDetectedGame;
+            if (isValidGame(last)) {
+              console.log('[HuntMaster Extension Popup] Invalid detection, keeping last detected game:', last.title);
+              displayGameInfo(last);
+            } else {
+              showStatus('No game detected on this page', 'info');
+            }
+          });
+        }
       }
     });
   } catch (e) {
     // Fallback to storage
     chrome.storage.local.get(['lastDetectedGame'], (result) => {
-      if (result.lastDetectedGame) {
-        displayGameInfo(result.lastDetectedGame);
+      const last = result.lastDetectedGame;
+      if (isValidGame(last)) {
+        displayGameInfo(last);
       } else {
         showStatus('No game detected on this page', 'info');
-        updateDetectedGame('No game detected', '-', '-');
+        // Keep previously shown game; do not clear
       }
     });
   }
@@ -150,6 +176,11 @@ function displayGameInfo(gameInfo) {
   
   // Disabled auto-fill of stake and win amounts to prevent random values from being detected
   // Users should manually enter these values
+  
+  // Refresh recent games list if a valid game was detected
+  if (gameInfo.title && gameInfo.title !== 'Not detected' && gameInfo.title !== 'Detecting...') {
+    loadRecentGames();
+  }
 }
 
 function updateDetectedGame(title, provider, source) {
@@ -341,18 +372,258 @@ async function updateCurrentGame(gameTitle, provider) {
   }
 }
 
-// Add current game to bonus hunt list
-async function addToHunt() {
+// Load and display recent games
+function loadRecentGames() {
+  const recentGamesList = document.getElementById('recent-games-list');
+  if (!recentGamesList) {
+    console.log('[HuntMaster Extension] Recent games list element not found, retrying...');
+    // Retry after a short delay in case DOM isn't ready yet
+    setTimeout(loadRecentGames, 100);
+    return;
+  }
+  
+  // Try to get from background script first
+  chrome.runtime.sendMessage({ type: 'GET_RECENT_GAMES' }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log('[HuntMaster Extension] Message failed, loading from storage directly:', chrome.runtime.lastError);
+      // Fallback: load directly from storage
+      chrome.storage.local.get(['recentGames'], (result) => {
+        displayRecentGames(result.recentGames || []);
+      });
+      return;
+    }
+    
+    if (!response) {
+      console.log('[HuntMaster Extension] No response, loading from storage directly');
+      // Fallback: load directly from storage
+      chrome.storage.local.get(['recentGames'], (result) => {
+        displayRecentGames(result.recentGames || []);
+      });
+      return;
+    }
+    
+    displayRecentGames(response.recentGames || []);
+  });
+}
+
+// Display recent games in the list
+function displayRecentGames(games) {
+  const recentGamesList = document.getElementById('recent-games-list');
+  if (!recentGamesList) return;
+  
+  if (games.length === 0) {
+    recentGamesList.innerHTML = '<p class="recent-games-empty">No recent games yet. Play some games to see them here!</p>';
+    return;
+  }
+  
+  recentGamesList.innerHTML = games.map((game, index) => {
+    const timeAgo = getTimeAgo(game.detectedAt || Date.now());
+    return `
+      <div class="recent-game-item" data-index="${index}">
+        <div class="recent-game-title">${escapeHtml(game.title || 'Unknown Game')}</div>
+        <div class="recent-game-time">${timeAgo}</div>
+      </div>
+    `;
+  }).join('');
+  
+  // Add click handlers
+  recentGamesList.querySelectorAll('.recent-game-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const index = parseInt(item.getAttribute('data-index'));
+      showAddToHuntModal(games[index]);
+    });
+  });
+}
+
+// Helper function to format time ago
+function getTimeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+  return 'Just now';
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Show add to hunt modal for a selected game
+function showAddToHuntModal(game) {
+  if (!game || !game.title) return;
+  
+  selectedGameForModal = game;
+  const modal = document.getElementById('add-to-hunt-modal');
+  const gameNameEl = document.getElementById('modal-game-name');
+  const stakeInput = document.getElementById('modal-stake');
+  
+  gameNameEl.textContent = game.title;
+  stakeInput.value = '';
+  modal.classList.add('show');
+  stakeInput.focus();
+}
+
+// Setup add to hunt modal event handlers
+function setupAddToHuntModal() {
+  const modal = document.getElementById('add-to-hunt-modal');
+  const cancelBtn = document.getElementById('modal-cancel-btn');
+  const confirmBtn = document.getElementById('modal-confirm-btn');
+  const stakeInput = document.getElementById('modal-stake');
+  let selectedGame = null;
+  
+  // Store selected game when modal is shown
+  const originalShowModal = showAddToHuntModal;
+  window.showAddToHuntModal = function(game) {
+    selectedGame = game;
+    originalShowModal(game);
+  };
+  
+  // Cancel button
+  cancelBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+    selectedGame = null;
+  });
+  
+  // Click outside modal to close
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.classList.remove('show');
+      selectedGame = null;
+    }
+  });
+  
+  // Confirm button
+  confirmBtn.addEventListener('click', async () => {
+    if (!selectedGame) return;
+    
+    const stake = parseFloat(stakeInput.value);
+    if (isNaN(stake) || stake <= 0) {
+      alert('Please enter a valid stake amount');
+      return;
+    }
+    
+    // Add to hunt using the selected game
+    await addGameToHunt(selectedGame.title, selectedGame.provider || null, stake);
+    modal.classList.remove('show');
+    selectedGame = null;
+  });
+  
+  // Enter key to confirm
+  stakeInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      confirmBtn.click();
+    }
+  });
+}
+
+// Add a game to hunt (extracted from addToHunt for reuse)
+async function addGameToHunt(gameTitle, provider, stake) {
   const { apiBaseUrl, sessionToken } = await loadConfig();
   
   if (!sessionToken) {
     showStatus('Please configure your session token first', 'error', 'hunt-status');
     return;
   }
+  
+  if (!gameTitle || gameTitle.trim() === '') {
+    showStatus('Game title is required', 'error', 'hunt-status');
+    return;
+  }
+  
+  if (isNaN(stake) || stake <= 0) {
+    showStatus('Please enter a valid stake amount', 'error', 'hunt-status');
+    return;
+  }
+  
+  const addBtn = document.getElementById('add-to-hunt-btn');
+  const originalText = addBtn.innerHTML;
+  addBtn.disabled = true;
+  addBtn.innerHTML = '<span>Adding...</span>';
+  
+  try {
+    // Step 1: Get current slots
+    const getResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'get'
+      })
+    });
+    
+    const getData = await getResponse.json();
+    
+    if (!getData.success) {
+      throw new Error(getData.error || 'Failed to get current slots');
+    }
+    
+    const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
+    
+    // Step 2: Check if game already exists in the list
+    const gameExists = currentSlots.some(slot => 
+      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
+      Number(slot.bet) === stake
+    );
+    
+    if (gameExists) {
+      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error', 'hunt-status');
+      addBtn.disabled = false;
+      addBtn.innerHTML = originalText;
+      return;
+    }
+    
+    // Step 3: Add new slot to the list
+    const newSlot = {
+      name: gameTitle,
+      bet: stake,
+      win: null // No win yet
+    };
+    
+    const updatedSlots = [...currentSlots, newSlot];
+    
+    // Step 4: Save all slots
+    const saveResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'save',
+        slots: updatedSlots
+      })
+    });
+    
+    const saveData = await saveResponse.json();
+    
+    if (saveData.success) {
+      const formattedStake = stake.toFixed(2);
+      const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
+      showStatus(successMessage, 'success', 'hunt-status');
+    } else {
+      throw new Error(saveData.error || 'Failed to add game to hunt list');
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error', 'hunt-status');
+  } finally {
+    addBtn.disabled = false;
+    addBtn.innerHTML = originalText;
+  }
+}
 
+// Add current game to bonus hunt list
+async function addToHunt() {
   const gameTitle = document.getElementById('detected-game').textContent.trim();
   const stakeInput = document.getElementById('hunt-stake');
   const stake = parseFloat(stakeInput.value);
+  const provider = document.getElementById('detected-provider').textContent.trim();
   
   // Validate inputs
   if (!gameTitle || gameTitle === 'Detecting...' || gameTitle === 'Not detected' || gameTitle === '') {
@@ -365,82 +636,8 @@ async function addToHunt() {
     stakeInput.focus();
     return;
   }
-
-  const addBtn = document.getElementById('add-to-hunt-btn');
-  addBtn.disabled = true;
-  addBtn.innerHTML = '<span>Adding...</span>';
-
-  try {
-    // Step 1: Get current slots
-    const getResponse = await fetch(`${apiBaseUrl}/api/slots`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session: sessionToken,
-        action: 'get'
-      })
-    });
-
-    const getData = await getResponse.json();
-    
-    if (!getData.success) {
-      throw new Error(getData.error || 'Failed to get current slots');
-    }
-
-    const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
-    
-    // Step 2: Check if game already exists in the list
-    const gameExists = currentSlots.some(slot => 
-      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
-      Number(slot.bet) === stake
-    );
-    
-    if (gameExists) {
-      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error', 'hunt-status');
-      addBtn.disabled = false;
-      addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
-      return;
-    }
-
-    // Step 3: Add new slot to the list
-    const newSlot = {
-      name: gameTitle,
-      bet: stake,
-      win: null // No win yet
-    };
-    
-    const updatedSlots = [...currentSlots, newSlot];
-
-    // Step 4: Save all slots
-    const saveResponse = await fetch(`${apiBaseUrl}/api/slots`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session: sessionToken,
-        action: 'save',
-        slots: updatedSlots
-      })
-    });
-
-    const saveData = await saveResponse.json();
-    console.log('Save response:', saveData);
-
-    if (saveData.success) {
-      // Format stake to 2 decimal places
-      const formattedStake = stake.toFixed(2);
-      const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
-      console.log('Showing success message:', successMessage);
-      showStatus(successMessage, 'success', 'hunt-status'); // Show in hunt-status element
-      // Keep stake value - don't clear it so it persists for next game
-    } else {
-      throw new Error(saveData.error || 'Failed to add game to hunt list');
-    }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error', 'hunt-status'); // Show errors in hunt-status too
-  } finally {
-    addBtn.disabled = false;
-    addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
-  }
+  
+  await addGameToHunt(gameTitle, provider === '-' ? null : provider, stake);
 }
 
 // Clear current game
@@ -910,6 +1107,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   await loadConfig();
   await detectGame();
+  loadRecentGames(); // Load recent games on popup open
+  
+  // Setup add to hunt modal
+  setupAddToHuntModal();
 
   // Open in window button
   document.getElementById('open-window-btn').addEventListener('click', openInWindow);

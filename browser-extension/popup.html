@@ -638,6 +638,154 @@
         0 6px 25px rgba(154, 217, 122, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
     }
+
+    .recent-games-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 130px;
+      overflow: hidden;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .recent-game-item {
+      background: rgba(30, 30, 40, 0.6);
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 22px;
+      height: 22px;
+      width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .recent-game-item:hover {
+      background: rgba(40, 50, 70, 0.8);
+      border-color: rgba(74, 158, 255, 0.4);
+      transform: translateX(2px);
+    }
+
+    .recent-game-title {
+      font-weight: 600;
+      color: #fff;
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      min-width: 0;
+      text-align: left;
+      margin-right: 8px;
+    }
+
+    .recent-game-time {
+      font-size: 9px;
+      color: #6b7280;
+      line-height: 1.2;
+      white-space: nowrap;
+      flex-shrink: 0;
+      text-align: right;
+    }
+
+    .recent-games-empty {
+      color: #888;
+      font-size: 12px;
+      text-align: center;
+      padding: 16px;
+      font-style: italic;
+    }
+
+    .add-to-hunt-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .add-to-hunt-modal.show {
+      display: flex;
+    }
+
+    .add-to-hunt-modal-content {
+      background: #1a1a2e;
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      border-radius: 8px;
+      padding: 20px;
+      min-width: 300px;
+      max-width: 90%;
+    }
+
+    .add-to-hunt-modal-content h3 {
+      color: #fff;
+      margin: 0 0 16px 0;
+      font-size: 18px;
+    }
+
+    .add-to-hunt-modal-content .game-name {
+      color: #9ad97a;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .add-to-hunt-modal-content label {
+      display: block;
+      color: #ccc;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .add-to-hunt-modal-content input {
+      width: 100%;
+      padding: 8px;
+      background: rgba(30, 30, 40, 0.8);
+      border: 1px solid rgba(74, 158, 255, 0.2);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 14px;
+      box-sizing: border-box;
+      margin-bottom: 16px;
+    }
+
+    .add-to-hunt-modal-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .add-to-hunt-modal-buttons button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .add-to-hunt-modal-buttons .cancel-btn {
+      background: rgba(100, 100, 100, 0.5);
+      color: #fff;
+    }
+
+    .add-to-hunt-modal-buttons .confirm-btn {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+      color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -672,6 +820,13 @@
       <button id="clear-btn" class="secondary"><span>Clear Current Game</span></button>
       <button id="lock-tab-btn" class="secondary"><span>🔒 Lock to This Tab</span></button>
       <div id="lock-status" class="status" style="display: none;"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Recent Games</div>
+      <div id="recent-games-list" class="recent-games-list">
+        <p class="text-muted" style="color: #888; font-size: 12px; margin: 8px 0;">Loading recent games...</p>
+      </div>
     </div>
 
     <div class="section">
@@ -765,6 +920,20 @@
     </div>
 
     <div id="status"></div>
+  </div>
+
+  <!-- Add to Hunt Modal -->
+  <div id="add-to-hunt-modal" class="add-to-hunt-modal">
+    <div class="add-to-hunt-modal-content">
+      <h3>Add to Bonus Hunt</h3>
+      <div class="game-name" id="modal-game-name"></div>
+      <label for="modal-stake">Stake Amount</label>
+      <input type="number" id="modal-stake" placeholder="0.00" step="0.01" min="0" />
+      <div class="add-to-hunt-modal-buttons">
+        <button class="cancel-btn" id="modal-cancel-btn">Cancel</button>
+        <button class="confirm-btn" id="modal-confirm-btn">Add to Hunt</button>
+      </div>
+    </div>
   </div>
 
   <script src="popup.js"></script>
