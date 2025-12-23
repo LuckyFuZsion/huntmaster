@@ -416,7 +416,29 @@ function displayRecentGames(games) {
     return;
   }
   
-  recentGamesList.innerHTML = games.map((game, index) => {
+  // Deduplicate games before displaying (case-insensitive, trimmed)
+  // This is a safeguard in case duplicates somehow get into storage
+  const normalizeKey = (title, provider) => {
+    const normalizedTitle = (title || '').toLowerCase().trim();
+    const normalizedProvider = (provider || '').toLowerCase().trim();
+    return `${normalizedTitle}|${normalizedProvider}`;
+  };
+  
+  const seen = new Set();
+  const uniqueGames = [];
+  
+  for (const game of games) {
+    const key = normalizeKey(game.title, game.provider);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueGames.push(game);
+    }
+  }
+  
+  // Store uniqueGames in a variable accessible to the click handler
+  const gamesToDisplay = uniqueGames;
+  
+  recentGamesList.innerHTML = gamesToDisplay.map((game, index) => {
     const timeAgo = getTimeAgo(game.detectedAt || Date.now());
     return `
       <div class="recent-game-item" data-index="${index}">
@@ -426,11 +448,13 @@ function displayRecentGames(games) {
     `;
   }).join('');
   
-  // Add click handlers
+  // Add click handlers (use gamesToDisplay instead of games)
   recentGamesList.querySelectorAll('.recent-game-item').forEach(item => {
     item.addEventListener('click', () => {
       const index = parseInt(item.getAttribute('data-index'));
-      showAddToHuntModal(games[index]);
+      if (index >= 0 && index < gamesToDisplay.length) {
+        showAddToHuntModal(gamesToDisplay[index]);
+      }
     });
   });
 }
@@ -568,6 +592,13 @@ async function addGameToHunt(gameTitle, provider, stake) {
     
     const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
     
+    // Ensure slots are sorted by creation order (maintain sequential order)
+    currentSlots.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+    
     // Step 2: Check if game already exists in the list
     const gameExists = currentSlots.some(slot => 
       slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
@@ -581,11 +612,17 @@ async function addGameToHunt(gameTitle, provider, stake) {
       return;
     }
     
-    // Step 3: Add new slot to the list
+    // Step 3: Add new slot to the list (preserve existing createdAt timestamps)
+    // New slot gets a timestamp after the last slot to maintain sequential order
+    const baseTime = currentSlots.length > 0 
+      ? new Date(currentSlots[currentSlots.length - 1].createdAt || Date.now()).getTime() + 1
+      : Date.now();
+    
     const newSlot = {
       name: gameTitle,
       bet: stake,
-      win: null // No win yet
+      win: null, // No win yet
+      createdAt: new Date(baseTime).toISOString() // Sequential timestamp
     };
     
     const updatedSlots = [...currentSlots, newSlot];
@@ -723,8 +760,166 @@ async function toggleTabLock() {
 let currentCollectSlot = null;
 let allSlots = [];
 let currentCollectIndex = -1; // Track current position in slots array
+let isCollectViewActive = false; // Track if collect view is active
 
-function showCollectBonusesView() {
+// Save extension state to chrome.storage
+async function saveExtensionState() {
+  const state = {
+    isCollectViewActive: isCollectViewActive,
+    currentCollectIndex: currentCollectIndex,
+    currentCollectSlot: currentCollectSlot ? {
+      id: currentCollectSlot.id,
+      name: currentCollectSlot.name,
+      bet: currentCollectSlot.bet,
+      win: currentCollectSlot.win
+    } : null,
+    // Save timestamp so we can validate state freshness
+    savedAt: Date.now()
+  };
+  
+  await chrome.storage.local.set({ extensionState: state });
+  console.log('[HuntMaster Extension] State saved:', state);
+}
+
+// Restore extension state from chrome.storage
+async function restoreExtensionState() {
+  try {
+    const result = await chrome.storage.local.get(['extensionState']);
+    const state = result.extensionState;
+    
+    if (!state) {
+      console.log('[HuntMaster Extension] No saved state found');
+      return false;
+    }
+    
+    // Check if state is too old (older than 24 hours, don't restore)
+    const stateAge = Date.now() - (state.savedAt || 0);
+    const MAX_STATE_AGE = 24 * 60 * 60 * 1000; // 24 hours
+    
+    if (stateAge > MAX_STATE_AGE) {
+      console.log('[HuntMaster Extension] Saved state is too old, not restoring');
+      await chrome.storage.local.remove('extensionState');
+      return false;
+    }
+    
+    console.log('[HuntMaster Extension] Restoring state:', state);
+    
+    // Restore collect view state
+    if (state.isCollectViewActive) {
+      isCollectViewActive = true;
+      currentCollectIndex = state.currentCollectIndex || -1;
+      
+      // Show collect view
+      document.querySelectorAll('.section').forEach(section => {
+        if (section.id !== 'collect-bonuses-section') {
+          section.style.display = 'none';
+        }
+      });
+      document.getElementById('collect-bonuses-section').style.display = 'block';
+      document.getElementById('collect-bonuses-btn').style.display = 'none';
+      document.getElementById('back-to-main-btn').style.display = 'block';
+      
+      // Load slots first, then restore position
+      const { apiBaseUrl, sessionToken } = await loadConfig();
+      
+      if (sessionToken) {
+        try {
+          // Fetch current slots
+          const response = await fetch(`${apiBaseUrl}/api/slots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: sessionToken, action: 'get' })
+          });
+
+          const data = await response.json();
+          
+          if (data.success) {
+            allSlots = data.slots || [];
+            
+            // Sort slots by creation order
+            allSlots.sort((a, b) => {
+              const timeA = new Date(a.createdAt || 0).getTime();
+              const timeB = new Date(b.createdAt || 0).getTime();
+              return timeA - timeB;
+            });
+            
+            // Find slots without wins
+            const slotsWithoutWin = allSlots.filter(slot => 
+              slot.win === null || slot.win === undefined || slot.win === 0
+            );
+            
+            if (slotsWithoutWin.length > 0) {
+              // Try to restore to saved position, or use saved slot name
+              let targetIndex = state.currentCollectIndex >= 0 ? state.currentCollectIndex : 0;
+              
+              // If we have a saved slot, try to find it by name
+              if (state.currentCollectSlot && state.currentCollectSlot.name) {
+                const savedSlotIndex = slotsWithoutWin.findIndex(slot => 
+                  slot.name.toLowerCase().trim() === state.currentCollectSlot.name.toLowerCase().trim()
+                );
+                if (savedSlotIndex >= 0) {
+                  targetIndex = savedSlotIndex;
+                }
+              }
+              
+              // Ensure index is valid
+              if (targetIndex >= slotsWithoutWin.length) {
+                targetIndex = slotsWithoutWin.length - 1;
+              }
+              if (targetIndex < 0) {
+                targetIndex = 0;
+              }
+              
+              currentCollectIndex = targetIndex;
+              currentCollectSlot = slotsWithoutWin[currentCollectIndex];
+              
+              if (currentCollectSlot) {
+                // Display slot info
+                document.getElementById('collect-game-name').textContent = currentCollectSlot.name;
+                document.getElementById('collect-game-stake').textContent = currentCollectSlot.bet ? currentCollectSlot.bet.toFixed(2) : '0.00';
+                document.getElementById('collect-win-amount').value = '';
+                
+                // Fetch game thumbnail
+                await loadGameThumbnail(currentCollectSlot.name);
+                
+                // Show game info
+                document.getElementById('collect-game-info').style.display = 'block';
+                document.getElementById('collect-loading').style.display = 'none';
+                document.getElementById('collect-complete').style.display = 'none';
+                
+                // Save state after restore
+                await saveExtensionState();
+              }
+            } else {
+              // No slots without wins - show complete message
+              document.getElementById('collect-loading').style.display = 'none';
+              document.getElementById('collect-complete').style.display = 'block';
+              document.getElementById('collect-game-info').style.display = 'none';
+              currentCollectIndex = -1;
+              currentCollectSlot = null;
+            }
+          }
+        } catch (error) {
+          console.error('[HuntMaster Extension] Error loading slots for restore:', error);
+          // Fall back to normal load
+          await loadNextCollectSlot();
+        }
+      } else {
+        // No session token, just load normally
+        await loadNextCollectSlot();
+      }
+      
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[HuntMaster Extension] Error restoring state:', error);
+    return false;
+  }
+}
+
+async function showCollectBonusesView() {
   // Hide main sections
   document.querySelectorAll('.section').forEach(section => {
     if (section.id !== 'collect-bonuses-section') {
@@ -737,11 +932,14 @@ function showCollectBonusesView() {
   document.getElementById('collect-bonuses-btn').style.display = 'none';
   document.getElementById('back-to-main-btn').style.display = 'block';
   
+  isCollectViewActive = true;
+  await saveExtensionState();
+  
   // Load first slot without win
-  loadNextCollectSlot();
+  await loadNextCollectSlot();
 }
 
-function showMainView() {
+async function showMainView() {
   // Show all main sections
   document.querySelectorAll('.section').forEach(section => {
     if (section.id !== 'collect-bonuses-section') {
@@ -755,8 +953,13 @@ function showMainView() {
   document.getElementById('back-to-main-btn').style.display = 'none';
   
   // Reset state
+  isCollectViewActive = false;
+  currentCollectIndex = -1;
   currentCollectSlot = null;
   allSlots = [];
+  
+  // Clear saved state
+  await chrome.storage.local.remove('extensionState');
 }
 
 // Load the next slot that needs a win
@@ -794,7 +997,15 @@ async function loadNextCollectSlot() {
 
     allSlots = data.slots || [];
     
-    // Find slots without wins
+    // Ensure slots are sorted by creation order (createdAt ascending)
+    // This maintains the sequential order they were added
+    allSlots.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+    
+    // Find slots without wins (maintains order from allSlots)
     const slotsWithoutWin = allSlots.filter(slot => 
       slot.win === null || slot.win === undefined || slot.win === 0
     );
@@ -834,6 +1045,9 @@ async function loadNextCollectSlot() {
     
     loadingEl.style.display = 'none';
     gameInfoEl.style.display = 'block';
+    
+    // Save state after loading slot
+    await saveExtensionState();
     
   } catch (error) {
     console.error('Error loading slots:', error);
@@ -935,8 +1149,8 @@ async function saveCollectWin() {
     showStatus(`✓ Win saved! ${winAmount.toFixed(2)} (${xWin}x)`, 'success', 'collect-status');
     
     // Wait a moment then load next slot
-    setTimeout(() => {
-      loadNextCollectSlot();
+    setTimeout(async () => {
+      await loadNextCollectSlot();
     }, 1000);
     
   } catch (error) {
@@ -950,6 +1164,13 @@ async function saveCollectWin() {
 
 // Go back to previous bonus
 async function goBackCollectBonus() {
+  // Ensure allSlots is sorted by creation order (sequential)
+  allSlots.sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeA - timeB;
+  });
+  
   const slotsWithoutWin = allSlots.filter(slot => 
     slot.win === null || slot.win === undefined || slot.win === 0
   );
@@ -975,6 +1196,9 @@ async function goBackCollectBonus() {
       document.getElementById('collect-loading').style.display = 'none';
       document.getElementById('collect-complete').style.display = 'none';
       document.getElementById('collect-status').textContent = '';
+      
+      // Save state after navigation
+      await saveExtensionState();
     }
   } else {
     showStatus('Already at first bonus', 'info', 'collect-status');
@@ -983,6 +1207,13 @@ async function goBackCollectBonus() {
 
 // Go forward to next bonus
 async function forwardCollectBonus() {
+  // Ensure allSlots is sorted by creation order (sequential)
+  allSlots.sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeA - timeB;
+  });
+  
   const slotsWithoutWin = allSlots.filter(slot => 
     slot.win === null || slot.win === undefined || slot.win === 0
   );
@@ -1008,6 +1239,9 @@ async function forwardCollectBonus() {
       document.getElementById('collect-loading').style.display = 'none';
       document.getElementById('collect-complete').style.display = 'none';
       document.getElementById('collect-status').textContent = '';
+      
+      // Save state after navigation
+      await saveExtensionState();
     }
   } else {
     showStatus('Already at last bonus', 'info', 'collect-status');
@@ -1106,7 +1340,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   winInput.value = '';
   
   await loadConfig();
-  await detectGame();
+  
+  // Try to restore extension state first
+  const stateRestored = await restoreExtensionState();
+  
+  // Only auto-detect game if we didn't restore to collect view
+  if (!stateRestored) {
+    await detectGame();
+  }
+  
   loadRecentGames(); // Load recent games on popup open
   
   // Setup add to hunt modal

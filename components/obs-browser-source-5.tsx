@@ -76,21 +76,8 @@ export default function OBSBrowserSource5() {
       const previousKey = previousSettingsRef.current
       previousSettingsRef.current = settingsKey
       
-      // If settings changed, reload slots (workaround for DELETE events not firing)
-      // This catches "Start new hunt" which clears balances
-      if (settingsChanged && slotsData?.refetch) {
-        console.log('🔄 Settings updated - reloading slots to sync with database', {
-          previousKey,
-          newKey: settingsKey,
-          currentSlotsCount: slots.length
-        })
-        // Small delay to ensure database operations complete
-        setTimeout(() => {
-          if (slotsData?.refetch) {
-            slotsData.refetch()
-          }
-        }, 500)
-      }
+      // Settings changes are handled by real-time subscriptions - no API calls needed
+      // Real-time events will update slots automatically when they change
       
       // Only update if value exists (not null/undefined/empty)
       if (s.startBalance != null && s.startBalance !== "") {
@@ -108,24 +95,8 @@ export default function OBSBrowserSource5() {
     const currentLength = slots.length
     const previousLength = previousSlotsLengthRef.current
     
-    // If we had slots and now have fewer, reload to sync with database
-    // But only if it's been at least 1 second since last reload to avoid spam
-    if (previousLength > 0 && currentLength < previousLength) {
-      const timeSinceLastReload = Date.now() - lastReloadTimeRef.current
-      if (timeSinceLastReload > 1000 && slotsData?.refetch) {
-        console.log('🔄 Slot count decreased unexpectedly - reloading to sync', {
-          previousLength,
-          currentLength,
-          timeSinceLastReload
-        })
-        lastReloadTimeRef.current = Date.now()
-        setTimeout(() => {
-          if (slotsData?.refetch) {
-            slotsData.refetch()
-          }
-        }, 300)
-      }
-    }
+    // Slot count changes are handled by real-time subscriptions - no API calls needed
+    // Real-time DELETE events will update the slots array automatically
     
     previousSlotsLengthRef.current = currentLength
   }, [slots.length, slotsData])

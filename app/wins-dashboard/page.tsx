@@ -18,7 +18,9 @@ import {
   Clock,
   Gamepad2,
   AlertTriangle,
+  Trash2,
 } from "lucide-react"
+import { decrypt } from "@/lib/protection"
 
 interface UserWin {
   id: string
@@ -72,6 +74,10 @@ export default function WinsDashboardPage() {
   const [winsData, setWinsData] = useState<WinsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
 
   const loadWins = useCallback(async () => {
     if (!username.trim()) {
@@ -114,11 +120,88 @@ export default function WinsDashboardPage() {
   }, [username, days, minXWin, minWinAmount])
 
   useEffect(() => {
+    // Get current user session
+    const session = localStorage.getItem("huntmaster_session")
+    if (session) {
+      try {
+        const sessionData = JSON.parse(decrypt(session))
+        setCurrentUserId(sessionData.userId || null)
+        setCurrentUsername(sessionData.username || null)
+        setIsAdmin(sessionData.isAdmin || sessionData.huntmasterAdmin || false)
+        
+        // Auto-populate username if not set and user is logged in
+        if (!username && sessionData.username) {
+          setUsername(sessionData.username)
+        }
+      } catch (error) {
+        console.error("Error parsing session:", error)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     // Auto-load on mount with default values
     if (username) {
       loadWins()
     }
   }, []) // Only run on mount
+
+  const handleDeleteWin = async (winId: string, winUserId: string) => {
+    // Check authorization
+    if (!isAdmin && currentUserId !== winUserId) {
+      setError("You can only delete your own wins")
+      return
+    }
+
+    if (!confirm("Are you sure you want to delete this win? This action cannot be undone.")) {
+      return
+    }
+
+    setDeletingIds(prev => new Set(prev).add(winId))
+    setError(null)
+
+    try {
+      const session = localStorage.getItem("huntmaster_session")
+      if (!session) {
+        setError("Not authenticated")
+        return
+      }
+
+      const response = await fetch(`/api/user-wins/${winId}?session=${encodeURIComponent(session)}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to delete win")
+      }
+
+      // Reload wins after deletion
+      await loadWins()
+    } catch (err: any) {
+      console.error("Error deleting win:", err)
+      setError(err?.message || "Failed to delete win")
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev)
+        next.delete(winId)
+        return next
+      })
+    }
+  }
+
+  // Check if user can delete a specific win
+  const canDeleteWin = (winUserId: string) => {
+    return isAdmin || currentUserId === winUserId
+  }
+
+  // Check if viewing own wins (for showing delete buttons)
+  const isViewingOwnWins = currentUsername && username.toLowerCase().trim() === currentUsername.toLowerCase().trim()
 
   // Calculate statistics for charts
   const stats = useMemo(() => {
@@ -435,6 +518,9 @@ export default function WinsDashboardPage() {
                         <TableHead className="text-gray-300">Bet</TableHead>
                         <TableHead className="text-gray-300">Win Amount</TableHead>
                         <TableHead className="text-gray-300">X Win</TableHead>
+                        {(isAdmin || isViewingOwnWins) && (
+                          <TableHead className="text-gray-300">Actions</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -453,6 +539,26 @@ export default function WinsDashboardPage() {
                             {formatCurrency(win.winAmount)}
                           </TableCell>
                           <TableCell className="text-blue-400 font-semibold">{win.xWin.toFixed(2)}x</TableCell>
+                          {(isAdmin || isViewingOwnWins) && (
+                            <TableCell>
+                              {canDeleteWin(win.userId) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteWin(win.id, win.userId)}
+                                  disabled={deletingIds.has(win.id)}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-950/20"
+                                  title={isAdmin ? "Delete win (admin)" : "Delete your win"}
+                                >
+                                  {deletingIds.has(win.id) ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-4 h-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>

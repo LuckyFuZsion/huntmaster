@@ -220,26 +220,17 @@ export function useSupabaseSlots(userId: string | null) {
               clearTimeout(debounceTimerRef.current)
             }
             
-            // AGGRESSIVE: Reload on ANY DELETE if we had more than 1 slot (likely bulk delete)
-            // Also reload immediately if list becomes empty
-            if (previousCount > 1 || slotsCountRef.current === 0) {
-              // Reload immediately - don't wait, bulk deletes might send all events at once
-              console.log('🔄 Reloading immediately after DELETE - deleteCount:', deleteEventCountRef.current, 'previousCount:', previousCount, 'remainingSlots:', slotsCountRef.current, 'userId:', userId)
-              deleteEventCountRef.current = 0
-              if (loadSlotsRef.current) {
-                // OPTIMIZATION: Increased delay to 500ms to batch multiple DELETE events and reduce API calls
-                setTimeout(() => {
-                  if (loadSlotsRef.current) {
-                    loadSlotsRef.current()
-                  }
-                }, 500) // Increased from 50ms to 500ms to reduce function duration costs
-              }
-            } else {
-              // For single slot deletes, reset counter after 1 second
-              deleteEventTimerRef.current = setTimeout(() => {
-                deleteEventCountRef.current = 0
-              }, 1000)
+            // Real-time DELETE events are handled above by filtering the slot from state
+            // No API call needed - we already removed it from the list
+            console.log('✅ Slot deleted via real-time (no API call):', payload.old.name, 'Remaining slots:', slotsCountRef.current)
+            
+            // Reset delete counter after a delay
+            if (deleteEventTimerRef.current) {
+              clearTimeout(deleteEventTimerRef.current)
             }
+            deleteEventTimerRef.current = setTimeout(() => {
+              deleteEventCountRef.current = 0
+            }, 1000)
           }
           // Note: We don't reload here - real-time payload has the latest data!
         }

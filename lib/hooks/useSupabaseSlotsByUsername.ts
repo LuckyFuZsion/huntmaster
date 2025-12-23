@@ -170,11 +170,11 @@ export function useSupabaseSlotsByUsername(username: string | null) {
             newWin: payload.new?.win
           })
           
-          // If userId not loaded yet, reload to get it and process the change
-          if (!userIdRef.current && changedSlot) {
-            console.log('Received real-time event but userId not loaded yet, reloading to get latest data:', payload.eventType)
-            debouncedReload()
-            return
+          // If userId not loaded yet, we can still process the event
+          // The userId will be loaded on initial load, and we can extract it from the slot
+          if (!userIdRef.current && changedSlot?.userId) {
+            userIdRef.current = changedSlot.userId
+            console.log('Extracted userId from real-time event:', changedSlot.userId)
           }
           
           // For DELETE events, process if we have slots locally (userId might not be in payload.old)
@@ -249,16 +249,18 @@ export function useSupabaseSlotsByUsername(username: string | null) {
               setSlots((prev) => {
                 const existingIndex = prev.findIndex((slot) => slot.id === updatedSlot.id)
                 if (existingIndex >= 0) {
-                  // Slot exists, update it
+                  // Slot exists, update it directly from real-time payload (no API call needed)
                   const updated = prev.map((slot) => (slot.id === updatedSlot.id ? updatedSlot : slot))
                   slotsCountRef.current = updated.length
-                  console.log('Slot updated via real-time:', updatedSlot.name, 'Win changed from', payload.old?.win, 'to', updatedSlot.win)
+                  console.log('✅ Slot updated via real-time (no API call):', updatedSlot.name, 'Win changed from', payload.old?.win, 'to', updatedSlot.win)
                   return updated
                 } else {
-                  // Slot doesn't exist in our list yet - reload to get all slots
-                  console.log('Slot updated but not in current list, reloading to get latest data:', updatedSlot.name)
-                  debouncedReload()
-                  return prev // Return current state while reloading
+                  // Slot doesn't exist in our list - this shouldn't happen, but if it does,
+                  // just add it to the list (no API call needed - we have the data from real-time)
+                  console.log('⚠️ Slot updated but not in current list, adding it:', updatedSlot.name)
+                  const updated = [...prev, updatedSlot]
+                  slotsCountRef.current = updated.length
+                  return updated
                 }
               })
             } else if (payload.eventType === 'DELETE' && payload.old) {
@@ -292,30 +294,23 @@ export function useSupabaseSlotsByUsername(username: string | null) {
                 clearTimeout(debounceTimerRef.current)
               }
               
-              // AGGRESSIVE: Reload on ANY DELETE if we had more than 1 slot (likely bulk delete)
-              // Also reload immediately if list becomes empty
-              if (previousCount > 1 || slotsCountRef.current === 0) {
-                // Reload immediately - don't wait, bulk deletes might send all events at once
-                console.log('🔄 Reloading immediately after DELETE - deleteCount:', deleteEventCountRef.current, 'previousCount:', previousCount, 'remainingSlots:', slotsCountRef.current, 'username:', username)
-                deleteEventCountRef.current = 0
-                if (loadSlotsRef.current) {
-                  // OPTIMIZATION: Increased delay to 500ms to batch multiple DELETE events and reduce API calls
-                  setTimeout(() => {
-                    if (loadSlotsRef.current) {
-                      loadSlotsRef.current()
-                    }
-                  }, 500) // Increased from 50ms to 500ms to reduce function duration costs
-                }
-              } else {
-                // For single slot deletes, reset counter after 1 second
-                deleteEventTimerRef.current = setTimeout(() => {
-                  deleteEventCountRef.current = 0
-                }, 1000)
+              // Real-time DELETE events are handled above by filtering the slot from state
+              // No API call needed - we already removed it from the list
+              // Only reload if we suspect bulk delete and want to verify (but this should be rare)
+              // For now, trust the real-time events - they're more efficient than API calls
+              console.log('✅ Slot deleted via real-time (no API call):', payload.old.name, 'Remaining slots:', slotsCountRef.current)
+              
+              // Reset delete counter after a delay
+              if (deleteEventTimerRef.current) {
+                clearTimeout(deleteEventTimerRef.current)
               }
+              deleteEventTimerRef.current = setTimeout(() => {
+                deleteEventCountRef.current = 0
+              }, 1000)
             } else {
-              // For batch operations or uncertainty, reload after debounce
-              console.log('Unknown event type or batch operation, reloading:', payload.eventType)
-              debouncedReload()
+              // Unknown event type - log but don't make API call
+              // Real-time events should handle all cases
+              console.log('⚠️ Unknown event type received:', payload.eventType, 'No API call needed - real-time should handle it')
             }
           } else {
             console.log('Slot event filtered out - wrong user:', {
@@ -325,18 +320,13 @@ export function useSupabaseSlotsByUsername(username: string | null) {
             })
           }
           
-          // WORKAROUND: If we have slots locally but receive an INSERT event for a slot we don't have,
-          // it might mean all slots were cleared and new ones are being added
-          // This helps catch bulk deletes that don't fire DELETE events
+          // If we receive an INSERT event but have no slots locally, it might be after a bulk delete
+          // However, we should trust real-time events - if we get INSERT events, we'll add them
+          // Only reload if we're really sure something is wrong (e.g., multiple INSERTs but still empty)
+          // For now, trust the real-time INSERT events - they'll populate the list naturally
           if (payload.eventType === 'INSERT' && payload.new && slotsCountRef.current === 0) {
-            console.log('🔍 Detected INSERT event but local slots are empty - might be after bulk delete, reloading')
-            if (loadSlotsRef.current) {
-              setTimeout(() => {
-                if (loadSlotsRef.current) {
-                  loadSlotsRef.current()
-                }
-              }, 100)
-            }
+            console.log('⚠️ INSERT event received but local slots are empty - will be handled by INSERT handler above')
+            // The INSERT handler above will add it to the list - no API call needed
           }
         }
       )

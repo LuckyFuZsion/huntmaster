@@ -393,7 +393,7 @@ export const supabaseAdmin = {
       return data
     },
     
-    async createBatch(slotsData: Array<Omit<Slot, 'id' | 'createdAt'>>): Promise<Slot[]> {
+    async createBatch(slotsData: Array<Omit<Slot, 'id' | 'createdAt'> & { createdAt?: string }>): Promise<Slot[]> {
       if (slotsData.length === 0) return []
       
       const { data, error } = await getSupabaseAdminClient()
@@ -401,13 +401,20 @@ export const supabaseAdmin = {
         .insert(
           slotsData.map(slot => ({
             ...slot,
-            createdAt: new Date().toISOString(),
+            createdAt: slot.createdAt || new Date().toISOString(),
           }))
         )
         .select()
       
       if (error) throw error
-      return data || []
+      // Ensure results are returned in the same order they were inserted
+      // Supabase should maintain insertion order, but we'll sort by createdAt to be sure
+      const sorted = (data || []).sort((a, b) => {
+        const timeA = new Date(a.createdAt || 0).getTime()
+        const timeB = new Date(b.createdAt || 0).getTime()
+        return timeA - timeB
+      })
+      return sorted
     },
     
     async update(id: string, data: Partial<Omit<Slot, 'id'>>): Promise<void> {
@@ -872,6 +879,42 @@ export const supabaseAdmin = {
         xWin: win.xWin || win.x_win,
         createdAt: win.createdAt || win.created_at,
       }))
+    },
+    
+    async delete(id: string): Promise<void> {
+      const { error } = await getSupabaseAdminClient()
+        .from('userWins')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+    },
+    
+    async findById(id: string): Promise<UserWin | null> {
+      const { data, error } = await getSupabaseAdminClient()
+        .from('userWins')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+      
+      if (error) {
+        if (error.code === 'PGRST116') return null // Not found
+        throw error
+      }
+      
+      if (!data) return null
+      
+      return {
+        id: data.id,
+        userId: data.userId || data.user_id,
+        gameTitle: data.gameTitle || data.game_title,
+        gameSlug: data.gameSlug || data.game_slug,
+        provider: data.provider,
+        bet: data.bet,
+        winAmount: data.winAmount || data.win_amount,
+        xWin: data.xWin || data.x_win,
+        createdAt: data.createdAt || data.created_at,
+      }
     },
   },
 

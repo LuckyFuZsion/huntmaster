@@ -1,5 +1,7 @@
+// MIGRATED TO DATABASE: This route now uses Supabase database instead of external API
+// This eliminates external API costs (was $0.01-0.02 per call)
 import { NextResponse } from "next/server";
-import { searchGameReviews } from "@/lib/slot-streamers-api";
+import { getSupabaseClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
   try {
@@ -12,53 +14,48 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "title or provider is required" }, { status: 400 });
     }
 
-    // Check if API key is configured
-    if (!process.env.SLOT_STREAMERS_API_KEY) {
-      console.error("SLOT_STREAMERS_API_KEY is not configured");
-      return NextResponse.json({ success: false, error: "API not configured" }, { status: 500 });
+    // Query game_reviews table directly (no external API call = no cost!)
+    const supabase = getSupabaseClient();
+    let query = supabase
+      .from('game_reviews')
+      .select('*')
+      .limit(limit);
+
+    if (title) {
+      query = query.ilike('title', `%${title}%`);
+    }
+    if (provider) {
+      query = query.ilike('provider', `%${provider}%`);
     }
 
-    let response;
-    try {
-      response = await searchGameReviews({
-        search: title || undefined,
-        developer: provider,
-        limit,
-        include_ratings: false,
-      });
-    } catch (apiError: any) {
-      console.error("Error calling searchGameReviews:", apiError);
-      console.error("Error details:", {
-        message: apiError?.message,
-        stack: apiError?.stack,
-        title,
-        provider,
-      });
-      return NextResponse.json({ 
-        success: false, 
-        error: apiError?.message || "Failed to search game reviews",
-        details: process.env.NODE_ENV === "development" ? apiError?.message : undefined
-      }, { status: 500 });
+    const { data: candidates, error } = await query;
+
+    if (error) {
+      console.error('Error querying game_reviews:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
     // Prefer exact or best match by title and provider when provided
     const normalized = (s: string) => s.trim().toLowerCase();
-    const candidates = Array.isArray(response?.data) ? response.data : [];
 
-    let best = candidates[0];
-    if (title) {
+    let best = (candidates || [])[0];
+    if (title && candidates && candidates.length > 0) {
       const nTitle = normalized(title);
       // Exact title match first, then startsWith, then includes
-      best = candidates.find(g => normalized(g.title) === nTitle) ||
-             candidates.find(g => normalized(g.title).startsWith(nTitle)) ||
-             candidates.find(g => normalized(g.title).includes(nTitle)) ||
+      best = candidates.find((g: any) => normalized(g.title || g.game_title) === nTitle) ||
+             candidates.find((g: any) => normalized(g.title || g.game_title).startsWith(nTitle)) ||
+             candidates.find((g: any) => normalized(g.title || g.game_title).includes(nTitle)) ||
              best;
     }
-    if (provider && best) {
+    if (provider && best && candidates) {
       const nProv = normalized(provider);
       // If best is not matching provider, try to find one that does
-      if (!best.developer || normalized(best.developer) !== nProv) {
-        const withProv = candidates.find(g => g.developer && normalized(g.developer) === nProv);
+      const bestProvider = best.provider || best.developer;
+      if (!bestProvider || normalized(bestProvider) !== nProv) {
+        const withProv = candidates.find((g: any) => {
+          const gProvider = g.provider || g.developer;
+          return gProvider && normalized(gProvider) === nProv;
+        });
         if (withProv) best = withProv;
       }
     }
@@ -67,32 +64,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: [], count: 0 });
     }
 
-    // Check both top-level and nested features.technical_specs for max_win
-    const maxWinVal = (best as any).max_win ?? 
-                     (best as any).max_win_x ?? 
-                     (best as any).max_win_multiplier ?? 
-                     (best as any).maxwin ??
-                     (best as any).features?.technical_specs?.max_win;
-    
-    // Check both top-level and nested features.technical_specs for volatility
-    const volatilityVal = (best as any).volatility ?? 
-                         (best as any).features?.technical_specs?.volatility;
-    
     const simplified = {
       id: best.id,
-      slug: best.slug,
-      title: best.title,
-      provider: best.developer,
-      thumbnail: best.thumbnail_url || best.banner_url || null,
-      maxWin: (maxWinVal && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
-      volatility: (volatilityVal && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
-      releaseDate: (() => {
-        const val = (best as any).release_date;
-        return (val && String(val).trim() !== "") ? String(val).trim() : undefined;
-      })(),
+      slug: best.slug || best.game_slug,
+      title: best.title || best.game_title,
+      provider: best.provider || best.developer,
+      thumbnail: best.thumbnail || best.thumbnail_url || best.banner_url || null,
+      maxWin: best.max_win ? String(best.max_win).trim() : undefined,
+      volatility: best.volatility ? String(best.volatility).trim() : undefined,
+      releaseDate: best.release_date ? String(best.release_date).trim() : undefined,
     };
 
-    return NextResponse.json({ success: true, data: [simplified], count: candidates.length });
+    console.log(`✅ Database query for slot-streamers search: "${title || provider}" returned ${(candidates || []).length} results (FREE - no external API cost!)`);
+
+    return NextResponse.json({ success: true, data: [simplified], count: (candidates || []).length });
   } catch (error) {
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

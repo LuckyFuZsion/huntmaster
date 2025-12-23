@@ -301,16 +301,20 @@ function handleMessage(message, sender, sendResponse, lockedTabId) {
       chrome.storage.local.get(['recentGames'], (result) => {
         let recentGames = result.recentGames || [];
         
-        // Check if this game is already in the list (by title and provider)
-        const gameKey = `${message.data.title}|${message.data.provider || ''}`;
-        const existingIndex = recentGames.findIndex(g => 
-          `${g.title}|${g.provider || ''}` === gameKey
-        );
+        // Normalize game key for comparison (case-insensitive, trimmed)
+        const normalizeKey = (title, provider) => {
+          const normalizedTitle = (title || '').toLowerCase().trim();
+          const normalizedProvider = (provider || '').toLowerCase().trim();
+          return `${normalizedTitle}|${normalizedProvider}`;
+        };
         
-        if (existingIndex !== -1) {
-          // Remove existing entry to move it to the front
-          recentGames.splice(existingIndex, 1);
-        }
+        const newGameKey = normalizeKey(message.data.title, message.data.provider);
+        
+        // Remove ALL duplicates (not just the first one) to prevent duplicates
+        recentGames = recentGames.filter(g => {
+          const existingKey = normalizeKey(g.title, g.provider);
+          return existingKey !== newGameKey;
+        });
         
         // Add new game to the front with timestamp
         const gameWithTime = {

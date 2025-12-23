@@ -54,13 +54,14 @@ export async function POST(request: Request) {
         return NextResponse.json(cached)
       }
 
-      // Get slots for the user
+      // Get slots for the user (already sorted by createdAt ascending in findByUserId)
       const slots = await supabaseAdmin.slots.findByUserId(userId)
       
       console.log(`Loaded ${slots.length} slots for userId ${userId}`)
       console.log("Slot names:", slots.map(s => s.name))
 
-      // Deduplicate slots by name (keep the most recent one)
+      // Deduplicate slots by name (keep the FIRST one to preserve order)
+      // This maintains sequential order when there are duplicates
       const seen = new Map<string, any>()
       const uniqueSlots = []
       
@@ -70,13 +71,21 @@ export async function POST(request: Request) {
           seen.set(name, slot)
           uniqueSlots.push(slot)
         } else {
-          console.log(`Duplicate slot found: "${slot.name}" - keeping only one instance`)
+          console.log(`Duplicate slot found: "${slot.name}" - keeping first instance to preserve order`)
         }
       }
       
       if (uniqueSlots.length !== slots.length) {
         console.log(`Deduplicated: ${slots.length} slots -> ${uniqueSlots.length} unique slots`)
       }
+      
+      // Ensure slots are sorted by createdAt (sequential order)
+      // This is already done by findByUserId, but we'll ensure it here too
+      uniqueSlots.sort((a, b) => {
+        const timeA = new Date(a.createdAt || 0).getTime()
+        const timeB = new Date(b.createdAt || 0).getTime()
+        return timeA - timeB
+      })
       
       const response = { success: true, slots: uniqueSlots }
       
@@ -246,11 +255,16 @@ export async function POST(request: Request) {
 
       // OPTIMIZATION: Create all slots in a single batch operation instead of one-by-one
       // This reduces function duration from O(n) to O(1) for slot creation
-      const slotsToCreate = uniqueSlotData.map(slot => ({
+      // IMPORTANT: Preserve sequential order by using incremental timestamps
+      const baseTime = Date.now()
+      const slotsToCreate = uniqueSlotData.map((slot, index) => ({
         name: slot.name,
         bet: slot.bet,
         win: slot.win,
         userId,
+        // Preserve order: use incremental timestamps to maintain sequential order
+        // Each slot gets a timestamp 1ms after the previous one
+        createdAt: slot.createdAt || new Date(baseTime + index).toISOString(),
       }))
       
       const createdSlots = await supabaseAdmin.slots.createBatch(slotsToCreate)
