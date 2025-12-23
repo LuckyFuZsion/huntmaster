@@ -89,17 +89,6 @@ async function saveConfig() {
   }
 }
 
-// Simple validator for a detected game
-function isValidGame(game) {
-  return (
-    game &&
-    game.title &&
-    game.title !== 'Not detected' &&
-    game.title !== 'Detecting...' &&
-    game.title.trim() !== ''
-  );
-}
-
 // Detect game from current tab
 async function detectGame() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -113,45 +102,41 @@ async function detectGame() {
   try {
     chrome.tabs.sendMessage(tab.id, { type: 'HUNTMASTER_GET_GAME_INFO' }, (response) => {
       if (chrome.runtime.lastError) {
-        // Content script might not be loaded, try storage but don't clear UI
+        // Content script might not be loaded, try storage
         chrome.storage.local.get(['lastDetectedGame'], (result) => {
-          const last = result.lastDetectedGame;
-          if (isValidGame(last)) {
-            displayGameInfo(last);
+          if (result.lastDetectedGame) {
+            displayGameInfo(result.lastDetectedGame);
           } else {
             showStatus('No game detected on this page', 'info');
-            // Keep previously shown game; do not clear
+            updateDetectedGame('No game detected', '-', '-');
           }
         });
       } else if (response && response.gameInfo) {
-        // Only update if valid; otherwise keep last valid game
-        if (isValidGame(response.gameInfo)) {
-          displayGameInfo(response.gameInfo);
-        } else {
-          chrome.storage.local.get(['lastDetectedGame'], (result) => {
-            const last = result.lastDetectedGame;
-            if (isValidGame(last)) {
-              console.log('[HuntMaster Extension Popup] Invalid detection, keeping last detected game:', last.title);
-              displayGameInfo(last);
-            } else {
-              showStatus('No game detected on this page', 'info');
-            }
-          });
-        }
+        displayGameInfo(response.gameInfo);
       }
     });
   } catch (e) {
     // Fallback to storage
     chrome.storage.local.get(['lastDetectedGame'], (result) => {
-      const last = result.lastDetectedGame;
-      if (isValidGame(last)) {
-        displayGameInfo(last);
+      if (result.lastDetectedGame) {
+        displayGameInfo(result.lastDetectedGame);
       } else {
         showStatus('No game detected on this page', 'info');
-        // Keep previously shown game; do not clear
+        updateDetectedGame('No game detected', '-', '-');
       }
     });
   }
+
+  // Also listen for messages from content script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'HUNTMASTER_GAME_DETECTED') {
+      displayGameInfo(message.data);
+      sendResponse({ success: true });
+      return true; // Indicate we'll send async response
+    }
+    // Return false if we don't handle the message to avoid async response warning
+    return false;
+  });
 }
 
 // Display detected game info
@@ -165,11 +150,6 @@ function displayGameInfo(gameInfo) {
   
   // Disabled auto-fill of stake and win amounts to prevent random values from being detected
   // Users should manually enter these values
-  
-  // Refresh recent games list if a valid game was detected
-  if (gameInfo.title && gameInfo.title !== 'Not detected' && gameInfo.title !== 'Detecting...') {
-    loadRecentGames();
-  }
 }
 
 function updateDetectedGame(title, provider, source) {
@@ -361,295 +341,18 @@ async function updateCurrentGame(gameTitle, provider) {
   }
 }
 
-// Load and display recent games
-function loadRecentGames() {
-  const recentGamesList = document.getElementById('recent-games-list');
-  if (!recentGamesList) {
-    console.log('[HuntMaster Extension] Recent games list element not found, retrying...');
-    // Retry after a short delay in case DOM isn't ready yet
-    setTimeout(loadRecentGames, 100);
-    return;
-  }
-  
-  // Try to get from background script first
-  chrome.runtime.sendMessage({ type: 'GET_RECENT_GAMES' }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.log('[HuntMaster Extension] Message failed, loading from storage directly:', chrome.runtime.lastError);
-      // Fallback: load directly from storage
-      chrome.storage.local.get(['recentGames'], (result) => {
-        displayRecentGames(result.recentGames || []);
-      });
-      return;
-    }
-    
-    if (!response) {
-      console.log('[HuntMaster Extension] No response, loading from storage directly');
-      // Fallback: load directly from storage
-      chrome.storage.local.get(['recentGames'], (result) => {
-        displayRecentGames(result.recentGames || []);
-      });
-      return;
-    }
-    
-    displayRecentGames(response.recentGames || []);
-  });
-}
-
-// Display recent games in the list
-function displayRecentGames(games) {
-  const recentGamesList = document.getElementById('recent-games-list');
-  if (!recentGamesList) return;
-  
-  if (games.length === 0) {
-    recentGamesList.innerHTML = '<p class="recent-games-empty">No recent games yet. Play some games to see them here!</p>';
-    return;
-  }
-  
-  // Deduplicate games before displaying (case-insensitive, trimmed)
-  // This is a safeguard in case duplicates somehow get into storage
-  const normalizeKey = (title, provider) => {
-    const normalizedTitle = (title || '').toLowerCase().trim();
-    const normalizedProvider = (provider || '').toLowerCase().trim();
-    return `${normalizedTitle}|${normalizedProvider}`;
-  };
-  
-  const seen = new Set();
-  const uniqueGames = [];
-  
-  for (const game of games) {
-    const key = normalizeKey(game.title, game.provider);
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueGames.push(game);
-    }
-  }
-  
-  // Store uniqueGames in a variable accessible to the click handler
-  const gamesToDisplay = uniqueGames;
-  
-  recentGamesList.innerHTML = gamesToDisplay.map((game, index) => {
-    const timeAgo = getTimeAgo(game.detectedAt || Date.now());
-    return `
-      <div class="recent-game-item" data-index="${index}">
-        <div class="recent-game-title">${escapeHtml(game.title || 'Unknown Game')}</div>
-        <div class="recent-game-time">${timeAgo}</div>
-      </div>
-    `;
-  }).join('');
-  
-  // Add click handlers (use gamesToDisplay instead of games)
-  recentGamesList.querySelectorAll('.recent-game-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const index = parseInt(item.getAttribute('data-index'));
-      if (index >= 0 && index < gamesToDisplay.length) {
-        showAddToHuntModal(gamesToDisplay[index]);
-      }
-    });
-  });
-}
-
-// Helper function to format time ago
-function getTimeAgo(timestamp) {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-  return 'Just now';
-}
-
-// Helper function to escape HTML
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// Show add to hunt modal for a selected game
-function showAddToHuntModal(game) {
-  if (!game || !game.title) return;
-  
-  selectedGameForModal = game;
-  const modal = document.getElementById('add-to-hunt-modal');
-  const gameNameEl = document.getElementById('modal-game-name');
-  const stakeInput = document.getElementById('modal-stake');
-  
-  gameNameEl.textContent = game.title;
-  stakeInput.value = '';
-  modal.classList.add('show');
-  stakeInput.focus();
-}
-
-// Setup add to hunt modal event handlers
-function setupAddToHuntModal() {
-  const modal = document.getElementById('add-to-hunt-modal');
-  const cancelBtn = document.getElementById('modal-cancel-btn');
-  const confirmBtn = document.getElementById('modal-confirm-btn');
-  const stakeInput = document.getElementById('modal-stake');
-  let selectedGame = null;
-  
-  // Store selected game when modal is shown
-  const originalShowModal = showAddToHuntModal;
-  window.showAddToHuntModal = function(game) {
-    selectedGame = game;
-    originalShowModal(game);
-  };
-  
-  // Cancel button
-  cancelBtn.addEventListener('click', () => {
-    modal.classList.remove('show');
-    selectedGame = null;
-  });
-  
-  // Click outside modal to close
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      modal.classList.remove('show');
-      selectedGame = null;
-    }
-  });
-  
-  // Confirm button
-  confirmBtn.addEventListener('click', async () => {
-    if (!selectedGame) return;
-    
-    const stake = parseFloat(stakeInput.value);
-    if (isNaN(stake) || stake <= 0) {
-      alert('Please enter a valid stake amount');
-      return;
-    }
-    
-    // Add to hunt using the selected game
-    await addGameToHunt(selectedGame.title, selectedGame.provider || null, stake);
-    modal.classList.remove('show');
-    selectedGame = null;
-  });
-  
-  // Enter key to confirm
-  stakeInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      confirmBtn.click();
-    }
-  });
-}
-
-// Add a game to hunt (extracted from addToHunt for reuse)
-async function addGameToHunt(gameTitle, provider, stake) {
+// Add current game to bonus hunt list
+async function addToHunt() {
   const { apiBaseUrl, sessionToken } = await loadConfig();
   
   if (!sessionToken) {
     showStatus('Please configure your session token first', 'error', 'hunt-status');
     return;
   }
-  
-  if (!gameTitle || gameTitle.trim() === '') {
-    showStatus('Game title is required', 'error', 'hunt-status');
-    return;
-  }
-  
-  if (isNaN(stake) || stake <= 0) {
-    showStatus('Please enter a valid stake amount', 'error', 'hunt-status');
-    return;
-  }
-  
-  const addBtn = document.getElementById('add-to-hunt-btn');
-  const originalText = addBtn.innerHTML;
-  addBtn.disabled = true;
-  addBtn.innerHTML = '<span>Adding...</span>';
-  
-  try {
-    // Step 1: Get current slots
-    const getResponse = await fetch(`${apiBaseUrl}/api/slots`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session: sessionToken,
-        action: 'get'
-      })
-    });
-    
-    const getData = await getResponse.json();
-    
-    if (!getData.success) {
-      throw new Error(getData.error || 'Failed to get current slots');
-    }
-    
-    const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
-    
-    // Ensure slots are sorted by creation order (maintain sequential order)
-    currentSlots.sort((a, b) => {
-      const timeA = new Date(a.createdAt || 0).getTime();
-      const timeB = new Date(b.createdAt || 0).getTime();
-      return timeA - timeB;
-    });
-    
-    // Step 2: Check if game already exists in the list
-    const gameExists = currentSlots.some(slot => 
-      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
-      Number(slot.bet) === stake
-    );
-    
-    if (gameExists) {
-      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error', 'hunt-status');
-      addBtn.disabled = false;
-      addBtn.innerHTML = originalText;
-      return;
-    }
-    
-    // Step 3: Add new slot to the list (preserve existing createdAt timestamps)
-    // New slot gets a timestamp after the last slot to maintain sequential order
-    const baseTime = currentSlots.length > 0 
-      ? new Date(currentSlots[currentSlots.length - 1].createdAt || Date.now()).getTime() + 1
-      : Date.now();
-    
-    const newSlot = {
-      name: gameTitle,
-      bet: stake,
-      win: null, // No win yet
-      createdAt: new Date(baseTime).toISOString() // Sequential timestamp
-    };
-    
-    const updatedSlots = [...currentSlots, newSlot];
-    
-    // Step 4: Save all slots
-    const saveResponse = await fetch(`${apiBaseUrl}/api/slots`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session: sessionToken,
-        action: 'save',
-        slots: updatedSlots
-      })
-    });
-    
-    const saveData = await saveResponse.json();
-    
-    if (saveData.success) {
-      const formattedStake = stake.toFixed(2);
-      const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
-      showStatus(successMessage, 'success', 'hunt-status');
-    } else {
-      throw new Error(saveData.error || 'Failed to add game to hunt list');
-    }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error', 'hunt-status');
-  } finally {
-    addBtn.disabled = false;
-    addBtn.innerHTML = originalText;
-  }
-}
 
-// Add current game to bonus hunt list
-async function addToHunt() {
   const gameTitle = document.getElementById('detected-game').textContent.trim();
   const stakeInput = document.getElementById('hunt-stake');
   const stake = parseFloat(stakeInput.value);
-  const provider = document.getElementById('detected-provider').textContent.trim();
   
   // Validate inputs
   if (!gameTitle || gameTitle === 'Detecting...' || gameTitle === 'Not detected' || gameTitle === '') {
@@ -662,8 +365,82 @@ async function addToHunt() {
     stakeInput.focus();
     return;
   }
-  
-  await addGameToHunt(gameTitle, provider === '-' ? null : provider, stake);
+
+  const addBtn = document.getElementById('add-to-hunt-btn');
+  addBtn.disabled = true;
+  addBtn.innerHTML = '<span>Adding...</span>';
+
+  try {
+    // Step 1: Get current slots
+    const getResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'get'
+      })
+    });
+
+    const getData = await getResponse.json();
+    
+    if (!getData.success) {
+      throw new Error(getData.error || 'Failed to get current slots');
+    }
+
+    const currentSlots = Array.isArray(getData.slots) ? getData.slots : [];
+    
+    // Step 2: Check if game already exists in the list
+    const gameExists = currentSlots.some(slot => 
+      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
+      Number(slot.bet) === stake
+    );
+    
+    if (gameExists) {
+      showStatus(`Game "${gameTitle}" with stake ${stake} already in hunt list`, 'error', 'hunt-status');
+      addBtn.disabled = false;
+      addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
+      return;
+    }
+
+    // Step 3: Add new slot to the list
+    const newSlot = {
+      name: gameTitle,
+      bet: stake,
+      win: null // No win yet
+    };
+    
+    const updatedSlots = [...currentSlots, newSlot];
+
+    // Step 4: Save all slots
+    const saveResponse = await fetch(`${apiBaseUrl}/api/slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: sessionToken,
+        action: 'save',
+        slots: updatedSlots
+      })
+    });
+
+    const saveData = await saveResponse.json();
+    console.log('Save response:', saveData);
+
+    if (saveData.success) {
+      // Format stake to 2 decimal places
+      const formattedStake = stake.toFixed(2);
+      const successMessage = `✓ "${gameTitle}" added to hunt at ${formattedStake} stake`;
+      console.log('Showing success message:', successMessage);
+      showStatus(successMessage, 'success', 'hunt-status'); // Show in hunt-status element
+      // Keep stake value - don't clear it so it persists for next game
+    } else {
+      throw new Error(saveData.error || 'Failed to add game to hunt list');
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error', 'hunt-status'); // Show errors in hunt-status too
+  } finally {
+    addBtn.disabled = false;
+    addBtn.innerHTML = '<span>🎯 Add to Hunt</span>';
+  }
 }
 
 // Clear current game
@@ -749,166 +526,8 @@ async function toggleTabLock() {
 let currentCollectSlot = null;
 let allSlots = [];
 let currentCollectIndex = -1; // Track current position in slots array
-let isCollectViewActive = false; // Track if collect view is active
 
-// Save extension state to chrome.storage
-async function saveExtensionState() {
-  const state = {
-    isCollectViewActive: isCollectViewActive,
-    currentCollectIndex: currentCollectIndex,
-    currentCollectSlot: currentCollectSlot ? {
-      id: currentCollectSlot.id,
-      name: currentCollectSlot.name,
-      bet: currentCollectSlot.bet,
-      win: currentCollectSlot.win
-    } : null,
-    // Save timestamp so we can validate state freshness
-    savedAt: Date.now()
-  };
-  
-  await chrome.storage.local.set({ extensionState: state });
-  console.log('[HuntMaster Extension] State saved:', state);
-}
-
-// Restore extension state from chrome.storage
-async function restoreExtensionState() {
-  try {
-    const result = await chrome.storage.local.get(['extensionState']);
-    const state = result.extensionState;
-    
-    if (!state) {
-      console.log('[HuntMaster Extension] No saved state found');
-      return false;
-    }
-    
-    // Check if state is too old (older than 24 hours, don't restore)
-    const stateAge = Date.now() - (state.savedAt || 0);
-    const MAX_STATE_AGE = 24 * 60 * 60 * 1000; // 24 hours
-    
-    if (stateAge > MAX_STATE_AGE) {
-      console.log('[HuntMaster Extension] Saved state is too old, not restoring');
-      await chrome.storage.local.remove('extensionState');
-      return false;
-    }
-    
-    console.log('[HuntMaster Extension] Restoring state:', state);
-    
-    // Restore collect view state
-    if (state.isCollectViewActive) {
-      isCollectViewActive = true;
-      currentCollectIndex = state.currentCollectIndex || -1;
-      
-      // Show collect view
-      document.querySelectorAll('.section').forEach(section => {
-        if (section.id !== 'collect-bonuses-section') {
-          section.style.display = 'none';
-        }
-      });
-      document.getElementById('collect-bonuses-section').style.display = 'block';
-      document.getElementById('collect-bonuses-btn').style.display = 'none';
-      document.getElementById('back-to-main-btn').style.display = 'block';
-      
-      // Load slots first, then restore position
-      const { apiBaseUrl, sessionToken } = await loadConfig();
-      
-      if (sessionToken) {
-        try {
-          // Fetch current slots
-          const response = await fetch(`${apiBaseUrl}/api/slots`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: sessionToken, action: 'get' })
-          });
-
-          const data = await response.json();
-          
-          if (data.success) {
-            allSlots = data.slots || [];
-            
-            // Sort slots by creation order
-            allSlots.sort((a, b) => {
-              const timeA = new Date(a.createdAt || 0).getTime();
-              const timeB = new Date(b.createdAt || 0).getTime();
-              return timeA - timeB;
-            });
-            
-            // Find slots without wins
-            const slotsWithoutWin = allSlots.filter(slot => 
-              slot.win === null || slot.win === undefined || slot.win === 0
-            );
-            
-            if (slotsWithoutWin.length > 0) {
-              // Try to restore to saved position, or use saved slot name
-              let targetIndex = state.currentCollectIndex >= 0 ? state.currentCollectIndex : 0;
-              
-              // If we have a saved slot, try to find it by name
-              if (state.currentCollectSlot && state.currentCollectSlot.name) {
-                const savedSlotIndex = slotsWithoutWin.findIndex(slot => 
-                  slot.name.toLowerCase().trim() === state.currentCollectSlot.name.toLowerCase().trim()
-                );
-                if (savedSlotIndex >= 0) {
-                  targetIndex = savedSlotIndex;
-                }
-              }
-              
-              // Ensure index is valid
-              if (targetIndex >= slotsWithoutWin.length) {
-                targetIndex = slotsWithoutWin.length - 1;
-              }
-              if (targetIndex < 0) {
-                targetIndex = 0;
-              }
-              
-              currentCollectIndex = targetIndex;
-              currentCollectSlot = slotsWithoutWin[currentCollectIndex];
-              
-              if (currentCollectSlot) {
-                // Display slot info
-                document.getElementById('collect-game-name').textContent = currentCollectSlot.name;
-                document.getElementById('collect-game-stake').textContent = currentCollectSlot.bet ? currentCollectSlot.bet.toFixed(2) : '0.00';
-                document.getElementById('collect-win-amount').value = '';
-                
-                // Fetch game thumbnail
-                await loadGameThumbnail(currentCollectSlot.name);
-                
-                // Show game info
-                document.getElementById('collect-game-info').style.display = 'block';
-                document.getElementById('collect-loading').style.display = 'none';
-                document.getElementById('collect-complete').style.display = 'none';
-                
-                // Save state after restore
-                await saveExtensionState();
-              }
-            } else {
-              // No slots without wins - show complete message
-              document.getElementById('collect-loading').style.display = 'none';
-              document.getElementById('collect-complete').style.display = 'block';
-              document.getElementById('collect-game-info').style.display = 'none';
-              currentCollectIndex = -1;
-              currentCollectSlot = null;
-            }
-          }
-        } catch (error) {
-          console.error('[HuntMaster Extension] Error loading slots for restore:', error);
-          // Fall back to normal load
-          await loadNextCollectSlot();
-        }
-      } else {
-        // No session token, just load normally
-        await loadNextCollectSlot();
-      }
-      
-      return true;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('[HuntMaster Extension] Error restoring state:', error);
-    return false;
-  }
-}
-
-async function showCollectBonusesView() {
+function showCollectBonusesView() {
   // Hide main sections
   document.querySelectorAll('.section').forEach(section => {
     if (section.id !== 'collect-bonuses-section') {
@@ -921,14 +540,11 @@ async function showCollectBonusesView() {
   document.getElementById('collect-bonuses-btn').style.display = 'none';
   document.getElementById('back-to-main-btn').style.display = 'block';
   
-  isCollectViewActive = true;
-  await saveExtensionState();
-  
   // Load first slot without win
-  await loadNextCollectSlot();
+  loadNextCollectSlot();
 }
 
-async function showMainView() {
+function showMainView() {
   // Show all main sections
   document.querySelectorAll('.section').forEach(section => {
     if (section.id !== 'collect-bonuses-section') {
@@ -942,13 +558,8 @@ async function showMainView() {
   document.getElementById('back-to-main-btn').style.display = 'none';
   
   // Reset state
-  isCollectViewActive = false;
-  currentCollectIndex = -1;
   currentCollectSlot = null;
   allSlots = [];
-  
-  // Clear saved state
-  await chrome.storage.local.remove('extensionState');
 }
 
 // Load the next slot that needs a win
@@ -986,15 +597,7 @@ async function loadNextCollectSlot() {
 
     allSlots = data.slots || [];
     
-    // Ensure slots are sorted by creation order (createdAt ascending)
-    // This maintains the sequential order they were added
-    allSlots.sort((a, b) => {
-      const timeA = new Date(a.createdAt || 0).getTime();
-      const timeB = new Date(b.createdAt || 0).getTime();
-      return timeA - timeB;
-    });
-    
-    // Find slots without wins (maintains order from allSlots)
+    // Find slots without wins
     const slotsWithoutWin = allSlots.filter(slot => 
       slot.win === null || slot.win === undefined || slot.win === 0
     );
@@ -1034,9 +637,6 @@ async function loadNextCollectSlot() {
     
     loadingEl.style.display = 'none';
     gameInfoEl.style.display = 'block';
-    
-    // Save state after loading slot
-    await saveExtensionState();
     
   } catch (error) {
     console.error('Error loading slots:', error);
@@ -1138,8 +738,8 @@ async function saveCollectWin() {
     showStatus(`✓ Win saved! ${winAmount.toFixed(2)} (${xWin}x)`, 'success', 'collect-status');
     
     // Wait a moment then load next slot
-    setTimeout(async () => {
-      await loadNextCollectSlot();
+    setTimeout(() => {
+      loadNextCollectSlot();
     }, 1000);
     
   } catch (error) {
@@ -1153,13 +753,6 @@ async function saveCollectWin() {
 
 // Go back to previous bonus
 async function goBackCollectBonus() {
-  // Ensure allSlots is sorted by creation order (sequential)
-  allSlots.sort((a, b) => {
-    const timeA = new Date(a.createdAt || 0).getTime();
-    const timeB = new Date(b.createdAt || 0).getTime();
-    return timeA - timeB;
-  });
-  
   const slotsWithoutWin = allSlots.filter(slot => 
     slot.win === null || slot.win === undefined || slot.win === 0
   );
@@ -1185,9 +778,6 @@ async function goBackCollectBonus() {
       document.getElementById('collect-loading').style.display = 'none';
       document.getElementById('collect-complete').style.display = 'none';
       document.getElementById('collect-status').textContent = '';
-      
-      // Save state after navigation
-      await saveExtensionState();
     }
   } else {
     showStatus('Already at first bonus', 'info', 'collect-status');
@@ -1196,13 +786,6 @@ async function goBackCollectBonus() {
 
 // Go forward to next bonus
 async function forwardCollectBonus() {
-  // Ensure allSlots is sorted by creation order (sequential)
-  allSlots.sort((a, b) => {
-    const timeA = new Date(a.createdAt || 0).getTime();
-    const timeB = new Date(b.createdAt || 0).getTime();
-    return timeA - timeB;
-  });
-  
   const slotsWithoutWin = allSlots.filter(slot => 
     slot.win === null || slot.win === undefined || slot.win === 0
   );
@@ -1228,9 +811,6 @@ async function forwardCollectBonus() {
       document.getElementById('collect-loading').style.display = 'none';
       document.getElementById('collect-complete').style.display = 'none';
       document.getElementById('collect-status').textContent = '';
-      
-      // Save state after navigation
-      await saveExtensionState();
     }
   } else {
     showStatus('Already at last bonus', 'info', 'collect-status');
@@ -1329,32 +909,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   winInput.value = '';
   
   await loadConfig();
-  
-  // Try to restore extension state first
-  const stateRestored = await restoreExtensionState();
-  
-  // Only auto-detect game if we didn't restore to collect view
-  if (!stateRestored) {
-    await detectGame();
-  }
-  
-  loadRecentGames(); // Load recent games on popup open
-  
-  // Setup add to hunt modal
-  setupAddToHuntModal();
-
-  // Set up event-driven message listener for game detection (no polling)
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'GAME_DETECTED') {
-      if (message.data && isValidGame(message.data)) {
-        displayGameInfo(message.data);
-      }
-      sendResponse({ success: true });
-      return true; // Indicate we'll send async response
-    }
-    // Return false if we don't handle the message to avoid async response warning
-    return false;
-  });
+  await detectGame();
 
   // Open in window button
   document.getElementById('open-window-btn').addEventListener('click', openInWindow);
@@ -1389,8 +944,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Save configuration
   document.getElementById('save-config-btn').addEventListener('click', saveConfig);
 
-  // Game detection is event-driven via chrome.runtime.onMessage listener
-  // No polling - updates come from content script when game changes are detected
+  // Auto-detect when popup opens (polling for content script messages)
+  setInterval(() => {
+    detectGame();
+  }, 2000);
 
   // Update X win calculation when stake or win amount changes
   // Also track manual edits to prevent auto-fill from overwriting user input

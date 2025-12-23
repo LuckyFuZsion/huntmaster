@@ -1,11 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { decrypt } from "@/lib/protection"
 import {
   Trophy,
   TrendingUp,
@@ -20,7 +22,6 @@ import {
   AlertTriangle,
   Trash2,
 } from "lucide-react"
-import { decrypt } from "@/lib/protection"
 
 interface UserWin {
   id: string
@@ -67,7 +68,11 @@ const formatCurrency = (amount: number) => {
 }
 
 export default function WinsDashboardPage() {
-  const [username, setUsername] = useState("Llandri")
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [username, setUsername] = useState("")
+  const [currentUser, setCurrentUser] = useState("")
+  const [isAdmin, setIsAdmin] = useState(false)
   const [days, setDays] = useState("7")
   const [minXWin, setMinXWin] = useState("100")
   const [minWinAmount, setMinWinAmount] = useState("")
@@ -78,6 +83,7 @@ export default function WinsDashboardPage() {
   const [currentUsername, setCurrentUsername] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
+  const [initialized, setInitialized] = useState(false)
 
   const loadWins = useCallback(async () => {
     if (!username.trim()) {
@@ -119,33 +125,60 @@ export default function WinsDashboardPage() {
     }
   }, [username, days, minXWin, minWinAmount])
 
+  // Initialize session and username on mount
   useEffect(() => {
-    // Get current user session
     const session = localStorage.getItem("huntmaster_session")
-    if (session) {
-      try {
-        const sessionData = JSON.parse(decrypt(session))
-        setCurrentUserId(sessionData.userId || null)
-        setCurrentUsername(sessionData.username || null)
-        setIsAdmin(sessionData.isAdmin || sessionData.huntmasterAdmin || false)
-        
-        // Auto-populate username if not set and user is logged in
-        if (!username && sessionData.username) {
-          setUsername(sessionData.username)
-        }
-      } catch (error) {
-        console.error("Error parsing session:", error)
-      }
+    if (!session) {
+      router.push("/login")
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
+    try {
+      const sessionData = JSON.parse(decrypt(session))
+      if (!sessionData?.username) {
+        router.push("/login")
+        return
+      }
+
+      const userUsername = sessionData.username
+      const userIsAdmin = sessionData.isAdmin || sessionData.huntmasterAdmin || false
+      
+      setCurrentUser(userUsername)
+      setCurrentUserId(sessionData.userId || null)
+      setCurrentUsername(userUsername)
+      setIsAdmin(userIsAdmin)
+
+      // Check URL parameter for username
+      const urlUsername = searchParams.get("username")
+      
+      if (urlUsername) {
+        // If user is admin, allow them to view any username
+        // If user is not admin, ignore URL param and use their own username
+        if (userIsAdmin) {
+          setUsername(urlUsername)
+        } else {
+          // Non-admin trying to view another user - use their own username
+          setUsername(userUsername)
+        }
+      } else {
+        // No URL param - default to their own username
+        setUsername(userUsername)
+      }
+
+      setInitialized(true)
+    } catch (err) {
+      console.error("Error loading session:", err)
+      router.push("/login")
+    }
+  }, [router, searchParams])
+
+  // Auto-load wins when username is set and initialized
   useEffect(() => {
-    // Auto-load on mount with default values
-    if (username) {
+    if (initialized && username) {
       loadWins()
     }
-  }, []) // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized, username]) // Only run when initialized and username changes
 
   const handleDeleteWin = async (winId: string, winUserId: string) => {
     // Check authorization
@@ -294,9 +327,22 @@ export default function WinsDashboardPage() {
                 <Input
                   placeholder="Enter username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="bg-gray-900/80 border-gray-700 text-white"
+                  onChange={(e) => {
+                    const newUsername = e.target.value
+                    // If user is not admin, prevent changing username to someone else
+                    if (!isAdmin && newUsername !== currentUser) {
+                      setError("You can only view your own wins")
+                      return
+                    }
+                    setUsername(newUsername)
+                    setError(null)
+                  }}
+                  disabled={!isAdmin}
+                  className="bg-gray-900/80 border-gray-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 />
+                {!isAdmin && (
+                  <p className="text-xs text-gray-400 mt-1">You can only view your own wins</p>
+                )}
               </div>
               <div>
                 <label className="text-sm text-gray-300 mb-2 block">Days (1-365)</label>

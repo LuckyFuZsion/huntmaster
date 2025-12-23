@@ -161,3 +161,6 @@ The extension has one clear purpose: to automatically detect casino games being 
 
 
 
+
+
+
