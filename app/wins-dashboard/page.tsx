@@ -1,11 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { decrypt } from "@/lib/protection"
 import {
   Trophy,
   TrendingUp,
@@ -65,13 +67,18 @@ const formatCurrency = (amount: number) => {
 }
 
 export default function WinsDashboardPage() {
-  const [username, setUsername] = useState("Llandri")
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [username, setUsername] = useState("")
+  const [currentUser, setCurrentUser] = useState("")
+  const [isAdmin, setIsAdmin] = useState(false)
   const [days, setDays] = useState("7")
   const [minXWin, setMinXWin] = useState("100")
   const [minWinAmount, setMinWinAmount] = useState("")
   const [winsData, setWinsData] = useState<WinsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [initialized, setInitialized] = useState(false)
 
   const loadWins = useCallback(async () => {
     if (!username.trim()) {
@@ -113,12 +120,58 @@ export default function WinsDashboardPage() {
     }
   }, [username, days, minXWin, minWinAmount])
 
+  // Initialize session and username on mount
   useEffect(() => {
-    // Auto-load on mount with default values
-    if (username) {
+    const session = localStorage.getItem("huntmaster_session")
+    if (!session) {
+      router.push("/login")
+      return
+    }
+
+    try {
+      const sessionData = JSON.parse(decrypt(session))
+      if (!sessionData?.username) {
+        router.push("/login")
+        return
+      }
+
+      const currentUsername = sessionData.username
+      const userIsAdmin = sessionData.isAdmin || false
+      
+      setCurrentUser(currentUsername)
+      setIsAdmin(userIsAdmin)
+
+      // Check URL parameter for username
+      const urlUsername = searchParams.get("username")
+      
+      if (urlUsername) {
+        // If user is admin, allow them to view any username
+        // If user is not admin, ignore URL param and use their own username
+        if (userIsAdmin) {
+          setUsername(urlUsername)
+        } else {
+          // Non-admin trying to view another user - use their own username
+          setUsername(currentUsername)
+        }
+      } else {
+        // No URL param - default to their own username
+        setUsername(currentUsername)
+      }
+
+      setInitialized(true)
+    } catch (err) {
+      console.error("Error loading session:", err)
+      router.push("/login")
+    }
+  }, [router, searchParams])
+
+  // Auto-load wins when username is set and initialized
+  useEffect(() => {
+    if (initialized && username) {
       loadWins()
     }
-  }, []) // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized, username]) // Only run when initialized and username changes
 
   // Calculate statistics for charts
   const stats = useMemo(() => {
@@ -211,9 +264,22 @@ export default function WinsDashboardPage() {
                 <Input
                   placeholder="Enter username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="bg-gray-900/80 border-gray-700 text-white"
+                  onChange={(e) => {
+                    const newUsername = e.target.value
+                    // If user is not admin, prevent changing username to someone else
+                    if (!isAdmin && newUsername !== currentUser) {
+                      setError("You can only view your own wins")
+                      return
+                    }
+                    setUsername(newUsername)
+                    setError(null)
+                  }}
+                  disabled={!isAdmin}
+                  className="bg-gray-900/80 border-gray-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 />
+                {!isAdmin && (
+                  <p className="text-xs text-gray-400 mt-1">You can only view your own wins</p>
+                )}
               </div>
               <div>
                 <label className="text-sm text-gray-300 mb-2 block">Days (1-365)</label>
