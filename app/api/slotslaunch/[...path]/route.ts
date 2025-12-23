@@ -1,3 +1,6 @@
+// ⚠️ WARNING: This route still makes external API calls and costs money ($0.01-0.02 per call)
+// Consider migrating to database queries instead
+// The main /api/slotslaunch route has been migrated to use the database
 import { NextResponse } from "next/server";
 
 const BASE = (process.env.SLOTSLAUNCH_API_BASE_URL || "").replace(/\/$/, "");
