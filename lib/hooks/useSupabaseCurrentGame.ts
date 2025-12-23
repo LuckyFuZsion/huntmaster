@@ -19,6 +19,9 @@ export function useSupabaseCurrentGame(username: string | null) {
   const userIdRef = useRef<string | null>(null)
   const loadingRef = useRef(false)
   const loadCurrentGameRef = useRef<() => Promise<void>>()
+  const lastReloadTimeRef = useRef<number>(0)
+  const initialLoadDoneRef = useRef<boolean>(false)
+  const RELOAD_DEBOUNCE_MS = 2000 // Prevent reloads more than once every 2 seconds
 
   const loadCurrentGame = useCallback(async () => {
     if (!username) {
@@ -63,16 +66,22 @@ export function useSupabaseCurrentGame(username: string | null) {
   }, [loadCurrentGame])
 
   useEffect(() => {
+    // Reset initial load flag when username changes
+    initialLoadDoneRef.current = false
+    lastReloadTimeRef.current = 0
+    
     if (!username) {
       setCurrentGame(null)
       setLoading(false)
+      userIdRef.current = null
       return
     }
 
     let channel: any = null
 
-    // Load initial game first to get userId
-    if (loadCurrentGameRef.current) {
+    // Load initial game first to get userId (only once per username change)
+    if (loadCurrentGameRef.current && !initialLoadDoneRef.current) {
+      initialLoadDoneRef.current = true
       loadCurrentGameRef.current()
     }
 
@@ -101,7 +110,14 @@ export function useSupabaseCurrentGame(username: string | null) {
           
           // If userIdRef is not set yet, reload to get the latest data
           // This handles the case where events arrive before initial load completes
+          // But debounce to prevent excessive API calls
           if (!userIdRef.current) {
+            const now = Date.now()
+            if (now - lastReloadTimeRef.current < RELOAD_DEBOUNCE_MS) {
+              console.log('Skipping reload - too soon since last reload')
+              return
+            }
+            lastReloadTimeRef.current = now
             console.log('Received real-time event but userId not loaded yet, reloading to get latest data:', payload.eventType)
             if (loadCurrentGameRef.current) {
               loadCurrentGameRef.current()
@@ -128,6 +144,13 @@ export function useSupabaseCurrentGame(username: string | null) {
                 }
               } else {
                 // Fallback: reload if payload doesn't have new data
+                // But debounce to prevent excessive API calls
+                const now = Date.now()
+                if (now - lastReloadTimeRef.current < RELOAD_DEBOUNCE_MS) {
+                  console.log('Skipping fallback reload - too soon since last reload')
+                  return
+                }
+                lastReloadTimeRef.current = now
                 console.log('Real-time event missing new data, reloading...')
                 if (loadCurrentGameRef.current) {
                   loadCurrentGameRef.current()

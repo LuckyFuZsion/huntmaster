@@ -152,17 +152,6 @@ async function detectGame() {
       }
     });
   }
-
-  // Also listen for messages from content script
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'HUNTMASTER_GAME_DETECTED') {
-      displayGameInfo(message.data);
-      sendResponse({ success: true });
-      return true; // Indicate we'll send async response
-    }
-    // Return false if we don't handle the message to avoid async response warning
-    return false;
-  });
 }
 
 // Display detected game info
@@ -1112,6 +1101,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup add to hunt modal
   setupAddToHuntModal();
 
+  // Set up event-driven message listener for game detection (no polling)
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'GAME_DETECTED') {
+      if (message.data && isValidGame(message.data)) {
+        displayGameInfo(message.data);
+      }
+      sendResponse({ success: true });
+      return true; // Indicate we'll send async response
+    }
+    // Return false if we don't handle the message to avoid async response warning
+    return false;
+  });
+
   // Open in window button
   document.getElementById('open-window-btn').addEventListener('click', openInWindow);
 
@@ -1145,10 +1147,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Save configuration
   document.getElementById('save-config-btn').addEventListener('click', saveConfig);
 
-  // Auto-detect when popup opens (polling for content script messages)
-  setInterval(() => {
-    detectGame();
-  }, 2000);
+  // Game detection is event-driven via chrome.runtime.onMessage listener
+  // No polling - updates come from content script when game changes are detected
 
   // Update X win calculation when stake or win amount changes
   // Also track manual edits to prevent auto-fill from overwriting user input
