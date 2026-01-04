@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "HuntMaster 2.0",
-  "version": "2.0.3",
+  "version": "3.4.0",
   "description": "Automatically detects the game you're playing on casino sites and updates your HuntMaster Now Playing widget",
   "homepage_url": "https://huntmaster.vercel.app",
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "http://localhost:3000/*",
@@ -28,7 +29,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "*://*.bc.game/*",
+        "*://bc.game/*",
+        "*://*.videoslots.com/*",
+        "*://videoslots.com/*",
+        "*://www.videoslots.com/*",
+        "*://*.vave.com/*",
+        "*://vave.com/*",
+        "*://*.gamba.com/*",
+        "*://gamba.com/*",
+        "*://*.gamba.io/*",
+        "*://gamba.io/*",
+        "*://*.cryptocasino.com/*",
+        "*://cryptocasino.com/*",
+        "*://*.cryptocasino.io/*",
+        "*://cryptocasino.io/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     },

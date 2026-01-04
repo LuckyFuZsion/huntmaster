@@ -1,8 +1,23 @@
 // Content script to detect game names from casino sites
-// This runs on all pages to detect game titles
+// This runs only on whitelisted casino domains
 
 (function() {
   'use strict';
+
+  // Early exit if not on a whitelisted casino domain
+  const hostname = window.location.hostname.toLowerCase();
+  const url = window.location.href.toLowerCase();
+  
+  const isWhitelisted = 
+    hostname.includes('bc.game') || url.includes('bc.game/game') ||
+    hostname.includes('videoslots') || url.includes('videoslots.com/play') ||
+    hostname.includes('vave') || url.includes('vave.com/casino/game') || url.includes('vave.com/live-casino/game') ||
+    hostname.includes('gamba') || url.includes('gamba') ||
+    hostname.includes('cryptocasino') || url.includes('cryptocasino');
+  
+  if (!isWhitelisted) {
+    return; // Not a whitelisted casino, exit early
+  }
 
   // Format provider names properly (handle common cases)
   function formatProviderName(provider) {
@@ -959,6 +974,9 @@
       console.log('[HuntMaster Extension] Detected game info:', gameInfo);
       console.log('[HuntMaster Extension] Page title:', document.title);
       console.log('[HuntMaster Extension] Casino detected:', detectCasino());
+      console.log('[HuntMaster Extension] Current URL:', window.location.href);
+      console.log('[HuntMaster Extension] Sending GAME_DETECTED message to background script');
+      
       // Store in background for popup access
       chrome.runtime.sendMessage({
         type: 'GAME_DETECTED',
@@ -982,51 +1000,105 @@
 
   // Detect on page load (with slight delay to let page load)
   setTimeout(sendGameInfo, 500);
+  
+  // Log that content script is loaded
+  console.log('[HuntMaster Extension] Content script loaded on:', window.location.href);
 
   // Track URL changes for SPA navigation (event-driven, no polling)
   let lastUrl = window.location.href;
+  let urlChangeTimeout = null;
+  
+  // Function to handle URL changes with immediate detection
+  function handleUrlChange(newUrl) {
+    if (newUrl !== lastUrl) {
+      lastUrl = newUrl;
+      console.log('[HuntMaster Extension] URL changed, detecting game immediately:', newUrl);
+      console.log('[HuntMaster Extension] Sending GAME_DETECTED message to background script');
+      
+      // Clear any pending timeout
+      if (urlChangeTimeout) {
+        clearTimeout(urlChangeTimeout);
+      }
+      
+      // Send immediately, then again after a short delay to catch late-loading content
+      sendGameInfo();
+      urlChangeTimeout = setTimeout(() => {
+        console.log('[HuntMaster Extension] Follow-up detection after URL change');
+        sendGameInfo();
+      }, 300);
+    }
+  }
   
   // Intercept History API calls for SPA navigation (pushState/replaceState)
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-  
-  history.pushState = function(...args) {
-    originalPushState.apply(history, args);
-    const currentUrl = window.location.href;
-    if (currentUrl !== lastUrl) {
-      lastUrl = currentUrl;
-      console.log('[HuntMaster Extension] Navigation detected (pushState), detecting game:', currentUrl);
-      setTimeout(sendGameInfo, 500);
-    }
-  };
-  
-  history.replaceState = function(...args) {
-    originalReplaceState.apply(history, args);
-    const currentUrl = window.location.href;
-    if (currentUrl !== lastUrl) {
-      lastUrl = currentUrl;
-      console.log('[HuntMaster Extension] Navigation detected (replaceState), detecting game:', currentUrl);
-      setTimeout(sendGameInfo, 500);
-    }
-  };
+  // Store original functions to prevent multiple wrapping
+  if (!history._huntmasterWrapped) {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    
+    history.pushState = function(...args) {
+      const result = originalPushState.apply(history, args);
+      // Use setTimeout to ensure URL has updated
+      setTimeout(() => {
+        const newUrl = window.location.href;
+        if (newUrl !== lastUrl) {
+          handleUrlChange(newUrl);
+        }
+      }, 0);
+      return result;
+    };
+    
+    history.replaceState = function(...args) {
+      const result = originalReplaceState.apply(history, args);
+      // Use setTimeout to ensure URL has updated
+      setTimeout(() => {
+        const newUrl = window.location.href;
+        if (newUrl !== lastUrl) {
+          handleUrlChange(newUrl);
+        }
+      }, 0);
+      return result;
+    };
+    
+    history._huntmasterWrapped = true;
+    console.log('[HuntMaster Extension] History API interceptors installed');
+  }
   
   // Listen for popstate events (back/forward navigation)
   window.addEventListener('popstate', () => {
-    const currentUrl = window.location.href;
-    if (currentUrl !== lastUrl) {
-      lastUrl = currentUrl;
-      console.log('[HuntMaster Extension] Navigation detected (popstate), detecting game:', currentUrl);
-      setTimeout(sendGameInfo, 500);
-    }
-  });
+    setTimeout(() => {
+      const newUrl = window.location.href;
+      if (newUrl !== lastUrl) {
+        handleUrlChange(newUrl);
+      }
+    }, 0);
+  }, true); // Use capture phase to catch early
+  
+  // Listen for hash changes (some sites use hash-based routing)
+  window.addEventListener('hashchange', () => {
+    handleUrlChange(window.location.href);
+  }, true);
 
   // Watch for title changes (some casino sites load games dynamically)
+  // This was the primary detection method in v2.0.3 and works well for SPA navigation
   let lastTitle = document.title;
+  let titleChangeTimeout = null;
   const titleObserver = new MutationObserver(() => {
     if (document.title !== lastTitle) {
       lastTitle = document.title;
       console.log('[HuntMaster Extension] Title changed, detecting game:', document.title);
-      setTimeout(sendGameInfo, 500); // Debounce
+      console.log('[HuntMaster Extension] Current URL:', window.location.href);
+      
+      // Clear any pending timeout
+      if (titleChangeTimeout) {
+        clearTimeout(titleChangeTimeout);
+      }
+      
+      // Send immediately, then again after delay to catch late-loading content
+      sendGameInfo();
+      titleChangeTimeout = setTimeout(() => {
+        console.log('[HuntMaster Extension] Follow-up detection after title change');
+        sendGameInfo();
+      }, 500);
     }
   });
 
@@ -1037,8 +1109,18 @@
   });
 
   // Watch for DOM changes that might indicate game loaded
+  // This helps catch games that load dynamically without title/URL changes
+  let domChangeTimeout = null;
   const domObserver = new MutationObserver(() => {
-    setTimeout(sendGameInfo, 1000); // Debounce DOM changes
+    // Clear any pending timeout
+    if (domChangeTimeout) {
+      clearTimeout(domChangeTimeout);
+    }
+    // Debounce DOM changes
+    domChangeTimeout = setTimeout(() => {
+      console.log('[HuntMaster Extension] DOM changed, detecting game');
+      sendGameInfo();
+    }, 1000);
   });
 
   domObserver.observe(document.body, {
@@ -1047,14 +1129,43 @@
     attributes: true,
     attributeFilter: ['data-game-name', 'data-game-title', 'class']
   });
+  
+  console.log('[HuntMaster Extension] All observers set up - URL, Title, and DOM monitoring active');
 
   // Listen for requests from extension
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'HUNTMASTER_PING') {
+      // Simple ping to check if content script is running
+      sendResponse({ status: 'ok' });
+      return true;
+    }
+    
     if (message.type === 'HUNTMASTER_GET_GAME_INFO') {
       try {
+        // Force fresh extraction of game info from the current page
+        console.log('[HuntMaster Extension Content] Fresh game info requested, extracting from page');
+        console.log('[HuntMaster Extension Content] Current URL:', window.location.href);
+        console.log('[HuntMaster Extension Content] Current title:', document.title);
+        
+        // Extract fresh game info from current DOM state
         const gameInfo = extractGameInfo();
+        console.log('[HuntMaster Extension Content] Extracted game info:', gameInfo);
+        
+        // Also send it to background script for storage (so it's available for other parts of extension)
+        if (gameInfo && gameInfo.title && gameInfo.title !== 'Not detected') {
+          chrome.runtime.sendMessage({
+            type: 'GAME_DETECTED',
+            data: gameInfo
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.log('[HuntMaster Extension Content] Error sending to background:', chrome.runtime.lastError.message);
+            }
+          });
+        }
+        
         sendResponse({ gameInfo });
       } catch (error) {
+        console.error('[HuntMaster Extension Content] Error extracting game info:', error);
         sendResponse({ error: error.message });
       }
       return true; // Keep channel open for async response
