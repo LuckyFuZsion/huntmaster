@@ -51,8 +51,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${baseUrl}/login?error=Discord+configuration+error`)
     }
 
-    // Get the code from the URL
+    // Get the code and state from the URL
     const code = request.nextUrl.searchParams.get("code")
+    const state = request.nextUrl.searchParams.get("state")
+    
+    // Check if this is a request from the browser extension (via state parameter)
+    const isExtension = state === "extension=true"
 
     if (!code) {
       console.error("No code provided in callback")
@@ -311,7 +315,68 @@ export async function GET(request: NextRequest) {
     // Encrypt the session
     const encryptedSession = encrypt(JSON.stringify(session))
 
-    // Create an HTML page to store the session
+    // If this is from the browser extension, return session via postMessage
+    if (isExtension) {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Discord Login Successful</title>
+          <meta charset="UTF-8">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+              color: #ffffff;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              padding: 20px;
+              text-align: center;
+            }
+            h1 {
+              color: #10b981;
+              margin-bottom: 10px;
+            }
+            p {
+              color: #8b9dc3;
+              margin-top: 10px;
+            }
+          </style>
+          <script>
+            console.log('[Discord Callback] Extension login detected');
+            console.log('[Discord Callback] window.opener:', window.opener ? 'exists' : 'null');
+            console.log('[Discord Callback] window.location.origin:', window.location.origin);
+            
+            // Store session in localStorage for extension to read
+            const sessionToken = "${encryptedSession.replace(/"/g, '\\"')}";
+            
+            // Store in localStorage (extension will read this)
+            localStorage.setItem("huntmaster_session", sessionToken);
+            
+            // Show success message - DO NOT REDIRECT for extension
+            document.body.innerHTML = '<h1>✓ Login Successful!</h1><p>The extension will close this window automatically.</p>';
+            
+            // Extension will close the window programmatically
+          </script>
+        </head>
+        <body>
+          <h1>Login Successful!</h1>
+          <p>You can close this window.</p>
+        </body>
+        </html>
+      `
+      return new NextResponse(html, {
+        headers: {
+          "Content-Type": "text/html",
+        },
+      })
+    }
+
+    // Regular web flow - create an HTML page to store the session
     const html = `
       <!DOCTYPE html>
       <html>

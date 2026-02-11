@@ -68,6 +68,21 @@ export async function GET(request: Request) {
     if (!q || q.trim().length < 2) {
       return NextResponse.json({ success: true, data: [], total: 0, limit });
     }
+    
+    // Normalize search query to handle "&" and "and" equivalently
+    // This ensures "Donny and Danny" will match "Donny & Danny" in the database
+    const normalizeSearchQuery = (query: string) => {
+      return query
+        .toLowerCase()
+        .trim()
+        .replace(/&/g, " and ") // Replace & with " and "
+        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
+        .replace(/\s+/g, " ") // Replace multiple spaces with single space
+        .trim();
+    };
+    
+    // Create normalized query for better matching
+    const normalizedQ = normalizeSearchQuery(q);
 
     // Removed: User slots check optimization
     // This was preventing searches from getting all matching games from external APIs
@@ -80,11 +95,22 @@ export async function GET(request: Request) {
     if (cached) {
       // Apply filtering to cached results to ensure they match the query
       // This fixes issues where cached results might be incomplete or from before filtering was added
-      const normalizedQuery = q.toLowerCase().trim();
+      // Normalize both query and title for "&" vs "and" matching
+      const normalizeForCache = (str: string) => {
+        return (str || '')
+          .toLowerCase()
+          .trim()
+          .replace(/&/g, " and ") // Replace & with " and "
+          .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
+          .replace(/[-–—]/g, " ") // Replace dashes with spaces
+          .replace(/\s+/g, " ") // Normalize multiple spaces to single space
+          .trim();
+      };
+      const normalizedQuery = normalizeForCache(q);
       if (cached.data && Array.isArray(cached.data)) {
         const filteredCached = cached.data.filter((item: any) => {
           if (!item.title) return false;
-          const normalizedTitle = item.title.toLowerCase().trim();
+          const normalizedTitle = normalizeForCache(item.title);
           return normalizedTitle.includes(normalizedQuery);
         });
         
@@ -146,11 +172,12 @@ export async function GET(request: Request) {
     try {
       // Query game_reviews table with case-insensitive search on title
       // Using ilike for case-insensitive pattern matching
+      // Use both original query and normalized query to catch "&" vs "and" variations
       // Only select columns that exist in the database
       const { data: gameReviews, error: ssError } = await getSupabaseClient()
         .from('game_reviews')
         .select('id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date, features')
-        .ilike('title', `%${q}%`)
+        .or(`title.ilike.%${q}%,title.ilike.%${normalizedQ}%`)
         .limit(limit);
       
       if (ssError) {
@@ -209,9 +236,13 @@ export async function GET(request: Request) {
     const MIN_RESULTS_THRESHOLD = 5; // If Slot Streamers has < 5 results, also check SlotsLaunch
     
     // Quick pre-filter check: see if Slot Streamers results will pass the title filter
-    // Use the same normalize function that will be used later
+    // Use the same normalize function that will be used later (includes "&" and "and" normalization)
     const normalizeForFilter = (str: string) => {
-      return str.toLowerCase()
+      return (str || '')
+        .toLowerCase()
+        .trim()
+        .replace(/&/g, " and ") // Replace & with " and "
+        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
         .replace(/[-–—]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
@@ -247,11 +278,12 @@ export async function GET(request: Request) {
       
       try {
         // Query slotslaunch_games table with case-insensitive search on name
+        // Use both original query and normalized query to catch "&" vs "and" variations
         // Only select columns that exist in the database
         const { data: slotsLaunchGames, error: slError } = await getSupabaseClient()
           .from('slotslaunch_games')
           .select('id, slug, name, provider, provider_slug, thumbnail_url, banner_url, max_win, volatility, release_date')
-          .ilike('name', `%${q}%`)
+          .or(`name.ilike.%${q}%,name.ilike.%${normalizedQ}%`)
           .limit(limit);
         
         if (slError) {
@@ -341,8 +373,13 @@ export async function GET(request: Request) {
     // Filter results to only include games where the title contains the search query
     // The API may match on provider/description, but we only want games with the query in the title
     // Use lenient normalization to handle special characters and spacing differences
+    // Includes "&" and "and" normalization to match "Donny & Danny" with "Donny and Danny"
     const normalize = (str: string) => {
-      return str.toLowerCase()
+      return (str || '')
+        .toLowerCase()
+        .trim()
+        .replace(/&/g, " and ") // Replace & with " and "
+        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
         .replace(/[-–—]/g, " ")  // Replace dashes with spaces
         .replace(/\s+/g, " ")      // Normalize multiple spaces to single space
         .trim();

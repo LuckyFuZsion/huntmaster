@@ -51,52 +51,6 @@ function updateUserInfo(sessionToken) {
   }
 }
 
-// Get widget URL based on current username and API base URL
-function getWidgetUrl() {
-  const apiBaseUrl = document.getElementById('api-base-url').value.trim() || 'https://huntmaster.vercel.app';
-  const sessionToken = document.getElementById('session-token').value;
-  const username = getUsernameFromSession(sessionToken);
-  
-  if (username && apiBaseUrl) {
-    const baseUrl = apiBaseUrl.replace(/\/$/, ''); // Remove trailing slash
-    return `${baseUrl}/widgets/now-playing?user=${encodeURIComponent(username)}&source=extension`;
-  }
-  
-  return null;
-}
-
-// Copy widget URL to clipboard
-async function copyWidgetUrl() {
-  const widgetUrl = getWidgetUrl();
-  
-  if (!widgetUrl) {
-    showStatus('Please login first to get your widget URL', 'error');
-    return;
-  }
-  
-  try {
-    await navigator.clipboard.writeText(widgetUrl);
-    showStatus('Widget URL copied to clipboard!', 'success');
-  } catch (err) {
-    // Fallback for older browsers - create temporary input
-    const tempInput = document.createElement('input');
-    tempInput.value = widgetUrl;
-    tempInput.style.position = 'fixed';
-    tempInput.style.opacity = '0';
-    document.body.appendChild(tempInput);
-    tempInput.select();
-    tempInput.setSelectionRange(0, 99999); // For mobile devices
-    try {
-      document.execCommand('copy');
-      document.body.removeChild(tempInput);
-      showStatus('Widget URL copied to clipboard!', 'success');
-    } catch (fallbackErr) {
-      document.body.removeChild(tempInput);
-      showStatus('Failed to copy URL. Please copy manually.', 'error');
-    }
-  }
-}
-
 // Load saved configuration
 async function loadConfig() {
   const result = await chrome.storage.local.get([API_BASE_URL_KEY, SESSION_TOKEN_KEY]);
@@ -283,20 +237,6 @@ async function handleDiscordLogin() {
           if (username) {
             showStatus(`Successfully logged in as: ${username}`, 'success');
             console.log('[Discord Login] Login successful for user:', username);
-            
-            // Force fresh game detection from the page after login
-            console.log('[Discord Login] Triggering fresh game detection after login');
-            detectGame(); // Don't await - let it run in background
-            
-            // Automatically update widget with current detected game after login
-            setTimeout(async () => {
-              const gameTitle = document.getElementById('detected-game')?.textContent?.trim();
-              const provider = document.getElementById('detected-provider')?.textContent?.trim();
-              if (gameTitle && gameTitle !== 'Detecting...' && gameTitle !== 'Not detected' && isValidGame({ title: gameTitle })) {
-                console.log('[Discord Login] Auto-updating widget with detected game after login:', gameTitle);
-                await updateCurrentGame(gameTitle, provider === '-' ? undefined : provider);
-              }
-            }, 2000); // Wait 2 seconds for game detection to complete
           } else {
             showStatus('Login successful, but could not extract username', 'error');
             console.error('[Discord Login] Could not extract username from session');
@@ -531,30 +471,12 @@ async function handleLogout() {
   updateLogoutButton();
 }
 
-// Update logout button visibility and hide/show auth fields
+// Update logout button visibility
 function updateLogoutButton() {
   const logoutBtn = document.getElementById('logout-btn');
   const sessionToken = document.getElementById('session-token').value;
-  const manualAuthSection = document.getElementById('manual-auth-section');
-  const discordLoginBtn = document.getElementById('discord-login-btn');
-  
   if (logoutBtn) {
     logoutBtn.style.display = sessionToken ? 'block' : 'none';
-  }
-  
-  // Hide manual auth section (session token, save config) when logged in
-  // Show Discord login button only when not logged in
-  if (manualAuthSection && discordLoginBtn) {
-    if (sessionToken) {
-      // Logged in - hide manual auth section and Discord login button
-      manualAuthSection.style.display = 'none';
-      discordLoginBtn.style.display = 'none';
-    } else {
-      // Not logged in - show Discord login button, hide manual auth section by default
-      // (User can manually show it if needed, but we'll keep it hidden for cleaner UI)
-      discordLoginBtn.style.display = 'block';
-      manualAuthSection.style.display = 'none';
-    }
   }
 }
 
@@ -569,103 +491,29 @@ function isValidGame(game) {
   );
 }
 
-
-// Detect game from current tab (respects locked tab if set)
+// Detect game from current tab
 async function detectGame() {
-  try {
-    // Check if extension is locked to a specific tab
-    const result = await chrome.storage.local.get(['lockedTabId']);
-    const lockedTabId = result.lockedTabId;
-    
-    let targetTabId = null;
-    
-    if (lockedTabId) {
-      // If locked, only detect from the locked tab
-      try {
-        const lockedTab = await chrome.tabs.get(lockedTabId);
-        targetTabId = lockedTab.id;
-        console.log('[HuntMaster Extension Popup] Tab is locked, detecting from locked tab:', targetTabId);
-      } catch (error) {
-        // Locked tab doesn't exist, clear the lock
-        await chrome.storage.local.remove('lockedTabId');
-        showStatus('Locked tab no longer exists, lock cleared', 'info');
-        // Fall through to detect from current tab
-      }
-    }
-    
-    // If not locked or locked tab doesn't exist, detect from current tab
-    if (!targetTabId) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) {
-        showStatus('Could not access current tab', 'error');
-        return;
-      }
-      targetTabId = tab.id;
-    }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  
+  if (!tab) {
+    showStatus('Could not access current tab', 'error');
+    return;
+  }
 
-    // Try to get game info from content script
-    // First, try to inject the content script if it's not already running
-    // This handles tabs that were loaded before the extension was installed/enabled
-    chrome.tabs.sendMessage(targetTabId, { type: 'HUNTMASTER_GET_GAME_INFO' }, async (response) => {
+  // Try to get game info from content script
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'HUNTMASTER_GET_GAME_INFO' }, (response) => {
       if (chrome.runtime.lastError) {
-        // Content script might not be loaded - try to inject it
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: targetTabId },
-            files: ['content.js']
-          });
-          // Wait a moment for script to initialize, then try again
-          setTimeout(() => {
-            chrome.tabs.sendMessage(targetTabId, { type: 'HUNTMASTER_GET_GAME_INFO' }, (response2) => {
-              if (chrome.runtime.lastError) {
-                // Still failed, use storage fallback
-                chrome.storage.local.get(['lastDetectedGame'], (result) => {
-                  const last = result.lastDetectedGame;
-                  if (isValidGame(last)) {
-                    displayGameInfo(last);
-                  } else {
-                    const currentTitle = document.getElementById('detected-game')?.textContent?.trim();
-                    if (currentTitle === 'Detecting...') {
-                      updateDetectedGame('Not detected', '-', '-');
-                    }
-                    showStatus('No game detected on this page', 'info');
-                  }
-                });
-              } else if (response2 && response2.gameInfo) {
-                if (isValidGame(response2.gameInfo)) {
-                  displayGameInfo(response2.gameInfo);
-                } else {
-                  chrome.storage.local.get(['lastDetectedGame'], (result) => {
-                    const last = result.lastDetectedGame;
-                    if (isValidGame(last)) {
-                      displayGameInfo(last);
-                    } else {
-                      const currentTitle = document.getElementById('detected-game')?.textContent?.trim();
-                      if (currentTitle === 'Detecting...') {
-                        updateDetectedGame('Not detected', '-', '-');
-                      }
-                      showStatus('No game detected on this page', 'info');
-                    }
-                  });
-                }
-              }
-            });
-          }, 300);
-        } catch (injectError) {
-          // Injection failed (e.g., chrome:// pages), use storage fallback
-          chrome.storage.local.get(['lastDetectedGame'], (result) => {
-            const last = result.lastDetectedGame;
-            if (isValidGame(last)) {
-              displayGameInfo(last);
-            } else {
-              const currentTitle = document.getElementById('detected-game')?.textContent?.trim();
-              if (currentTitle === 'Detecting...') {
-                updateDetectedGame('Not detected', '-', '-');
-              }
-              showStatus('No game detected on this page', 'info');
-            }
-          });
-        }
+        // Content script might not be loaded, try storage but don't clear UI
+        chrome.storage.local.get(['lastDetectedGame'], (result) => {
+          const last = result.lastDetectedGame;
+          if (isValidGame(last)) {
+            displayGameInfo(last);
+          } else {
+            showStatus('No game detected on this page', 'info');
+            // Keep previously shown game; do not clear
+          }
+        });
       } else if (response && response.gameInfo) {
         // Only update if valid; otherwise keep last valid game
         if (isValidGame(response.gameInfo)) {
@@ -677,33 +525,13 @@ async function detectGame() {
               console.log('[HuntMaster Extension Popup] Invalid detection, keeping last detected game:', last.title);
               displayGameInfo(last);
             } else {
-              // Clear "Detecting..." if no game found
-              const currentTitle = document.getElementById('detected-game')?.textContent?.trim();
-              if (currentTitle === 'Detecting...') {
-                updateDetectedGame('Not detected', '-', '-');
-              }
               showStatus('No game detected on this page', 'info');
             }
           });
         }
-      } else {
-        // No response at all - clear "Detecting..." state
-        chrome.storage.local.get(['lastDetectedGame'], (result) => {
-          const last = result.lastDetectedGame;
-          if (isValidGame(last)) {
-            displayGameInfo(last);
-          } else {
-            const currentTitle = document.getElementById('detected-game')?.textContent?.trim();
-            if (currentTitle === 'Detecting...') {
-              updateDetectedGame('Not detected', '-', '-');
-            }
-            showStatus('No game detected on this page', 'info');
-          }
-        });
       }
     });
   } catch (e) {
-    console.error('[HuntMaster Extension Popup] Error detecting game:', e);
     // Fallback to storage
     chrome.storage.local.get(['lastDetectedGame'], (result) => {
       const last = result.lastDetectedGame;
@@ -968,34 +796,18 @@ function displayRecentGames(games) {
     return;
   }
   
-  // Filter out known invalid titles (only the specific problematic ones)
-  const invalidTitles = ['loading...', 'loading', 'bonus hunt tracker', 'discord'];
-  const validGames = games.filter(game => {
-    if (!game || !game.title) return false;
-    const normalizedTitle = (game.title || '').toLowerCase().trim();
-    return !invalidTitles.includes(normalizedTitle);
-  });
-  
-  if (validGames.length === 0) {
-    recentGamesList.innerHTML = '<p class="recent-games-empty">No recent games yet. Play some games to see them here!</p>';
-    return;
-  }
-  
-  // Deduplicate games before displaying (case-insensitive, trimmed, and/& normalized)
+  // Deduplicate games before displaying (case-insensitive, trimmed)
   // This is a safeguard in case duplicates somehow get into storage
   const normalizeKey = (title, provider) => {
-    let normalizedTitle = (title || '').toLowerCase().trim();
-    let normalizedProvider = (provider || '').toLowerCase().trim();
-    // Normalize "and" and "&" to be equivalent
-    normalizedTitle = normalizedTitle.replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
-    normalizedProvider = normalizedProvider.replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
+    const normalizedTitle = (title || '').toLowerCase().trim();
+    const normalizedProvider = (provider || '').toLowerCase().trim();
     return `${normalizedTitle}|${normalizedProvider}`;
   };
   
   const seen = new Set();
   const uniqueGames = [];
   
-  for (const game of validGames) {
+  for (const game of games) {
     const key = normalizeKey(game.title, game.provider);
     if (!seen.has(key)) {
       seen.add(key);
@@ -1168,12 +980,8 @@ async function addGameToHunt(gameTitle, provider, stake) {
     });
     
     // Step 2: Check if game already exists in the list
-    // Normalize "and" and "&" for comparison
-    const normalizeForComparison = (str) => {
-      return (str || '').toLowerCase().trim().replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
-    };
     const gameExists = currentSlots.some(slot => 
-      normalizeForComparison(slot.name) === normalizeForComparison(gameTitle) && 
+      slot.name.toLowerCase().trim() === gameTitle.toLowerCase().trim() && 
       Number(slot.bet) === stake
     );
     
@@ -1310,49 +1118,14 @@ async function toggleTabLock() {
       showStatus('Tab lock removed', 'info');
     } else {
       // Lock: get current tab and store its ID
-      // Only one tab can be locked at a time - this will replace any previous lock
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab && tab.id) {
-        // Clear any existing lock first (ensures only one tab is locked)
-        await chrome.storage.local.remove('lockedTabId');
-        // Set new lock
         await chrome.storage.local.set({ lockedTabId: tab.id });
         lockBtn.innerHTML = '<span>🔓 Unlock Tab</span>';
         lockStatus.textContent = `🔒 Locked to tab: ${tab.url || 'Current tab'}`;
         lockStatus.className = 'status info';
         lockStatus.style.display = 'block';
         showStatus('Tab locked - extension will only work on this tab', 'success');
-        
-        // Automatically update widget with current detected game when locking tab
-        setTimeout(async () => {
-          // Get game info from the locked tab
-          try {
-            const response = await chrome.tabs.sendMessage(tab.id, { type: 'HUNTMASTER_GET_GAME_INFO' });
-            if (response && response.gameInfo && response.gameInfo.title) {
-              const gameInfo = response.gameInfo;
-              if (isValidGame(gameInfo)) {
-                console.log('[Tab Lock] Auto-updating widget with detected game from locked tab:', gameInfo.title);
-                await updateCurrentGame(gameInfo.title, gameInfo.provider);
-              }
-            } else {
-              // Fallback: use currently displayed game
-              const gameTitle = document.getElementById('detected-game')?.textContent?.trim();
-              const provider = document.getElementById('detected-provider')?.textContent?.trim();
-              if (gameTitle && gameTitle !== 'Detecting...' && gameTitle !== 'Not detected' && isValidGame({ title: gameTitle })) {
-                console.log('[Tab Lock] Auto-updating widget with displayed game:', gameTitle);
-                await updateCurrentGame(gameTitle, provider === '-' ? undefined : provider);
-              }
-            }
-          } catch (error) {
-            // Content script might not be ready, try using displayed game
-            const gameTitle = document.getElementById('detected-game')?.textContent?.trim();
-            const provider = document.getElementById('detected-provider')?.textContent?.trim();
-            if (gameTitle && gameTitle !== 'Detecting...' && gameTitle !== 'Not detected' && isValidGame({ title: gameTitle })) {
-              console.log('[Tab Lock] Auto-updating widget with displayed game (fallback):', gameTitle);
-              await updateCurrentGame(gameTitle, provider === '-' ? undefined : provider);
-            }
-          }
-        }, 500); // Wait 500ms for content script to be ready
       } else {
         showStatus('Could not get current tab', 'error');
       }
@@ -1461,12 +1234,8 @@ async function restoreExtensionState() {
               
               // If we have a saved slot, try to find it by name
               if (state.currentCollectSlot && state.currentCollectSlot.name) {
-                // Normalize "and" and "&" for comparison
-                const normalizeForComparison = (str) => {
-                  return (str || '').toLowerCase().trim().replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
-                };
                 const savedSlotIndex = slotsWithoutWin.findIndex(slot => 
-                  normalizeForComparison(slot.name) === normalizeForComparison(state.currentCollectSlot.name)
+                  slot.name.toLowerCase().trim() === state.currentCollectSlot.name.toLowerCase().trim()
                 );
                 if (savedSlotIndex >= 0) {
                   targetIndex = savedSlotIndex;
@@ -1955,34 +1724,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Try to restore extension state first
   const stateRestored = await restoreExtensionState();
   
-  // Always force fresh game detection when popup opens (pulls latest info from page)
-  // Only skip if we restored to collect view
+  // Only auto-detect game if we didn't restore to collect view
   if (!stateRestored) {
-    // First, try to load from storage to show something immediately
-    chrome.storage.local.get(['lastDetectedGame'], (result) => {
-      const last = result.lastDetectedGame;
-      if (isValidGame(last)) {
-        console.log('[Popup Open] Loading cached game from storage:', last.title);
-        displayGameInfo(last);
-      }
-    });
-    
-    // Then force fresh detection from the page (non-blocking)
-    console.log('[Popup Open] Triggering fresh game detection from page');
-    detectGame(); // Don't await - let it run in background
-    
-    // After game detection, automatically update widget if user is logged in and game is valid
-    setTimeout(async () => {
-      const sessionToken = document.getElementById('session-token').value;
-      if (sessionToken) {
-        const gameTitle = document.getElementById('detected-game')?.textContent?.trim();
-        const provider = document.getElementById('detected-provider')?.textContent?.trim();
-        if (gameTitle && gameTitle !== 'Detecting...' && gameTitle !== 'Not detected' && isValidGame({ title: gameTitle })) {
-          console.log('[Popup Open] Auto-updating widget with detected game:', gameTitle);
-          await updateCurrentGame(gameTitle, provider === '-' ? undefined : provider);
-        }
-      }
-    }, 2000); // Wait 2 seconds for game detection to complete
+    await detectGame();
   }
   
   loadRecentGames(); // Load recent games on popup open
@@ -1991,23 +1735,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupAddToHuntModal();
 
   // Set up event-driven message listener for game detection (no polling)
-  chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GAME_DETECTED') {
-      // Check if extension is locked to a specific tab
-      const result = await chrome.storage.local.get(['lockedTabId']);
-      const lockedTabId = result.lockedTabId;
-      
-      // If locked, only process messages from the locked tab
-      // Messages from background script (no sender.tab) are always allowed
-      if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
-        console.log('[HuntMaster Extension Popup] Ignoring GAME_DETECTED from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
-        sendResponse({ success: true });
-        return true; // Don't process, but send response
-      }
-      
-      // Process message only if from locked tab (or no lock active)
       if (message.data && isValidGame(message.data)) {
-        console.log('[HuntMaster Extension Popup] Processing GAME_DETECTED from tab:', sender.tab?.id, 'Locked to:', lockedTabId);
         displayGameInfo(message.data);
       }
       sendResponse({ success: true });
@@ -2060,12 +1790,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', handleLogout);
-  }
-  
-  // Copy widget URL button
-  const copyWidgetUrlBtn = document.getElementById('copy-widget-url-btn');
-  if (copyWidgetUrlBtn) {
-    copyWidgetUrlBtn.addEventListener('click', copyWidgetUrl);
   }
   
   // Update logout button visibility on load

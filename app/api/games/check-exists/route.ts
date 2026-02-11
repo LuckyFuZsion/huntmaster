@@ -14,13 +14,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "gameTitle is required" }, { status: 400 })
     }
 
-    // Normalize game title for comparison
+    // Normalize game title for comparison (handles "&" and "and" equivalently)
     const normalize = (title: string) =>
       title
         .toLowerCase()
         .trim()
-        .replace(/[-–—]/g, " ")
-        .replace(/\s+/g, " ")
+        .replace(/&/g, " and ") // Replace & with " and "
+        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
+        .replace(/[-–—]/g, " ") // Replace hyphens, en-dashes, em-dashes with spaces
+        .replace(/\s+/g, " ") // Replace multiple spaces with single space
         .trim()
 
     const normalizedTitle = normalize(gameTitle)

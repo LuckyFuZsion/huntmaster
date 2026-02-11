@@ -838,7 +838,6 @@
         </div>
       </div>
       <button id="add-to-hunt-btn"><span>🎯 Add to Hunt</span></button>
-      <button id="collect-bonuses-btn" class="secondary" style="margin-top: 10px; width: 100%;"><span>🎰 Collect Bonuses</span></button>
       <div id="hunt-status" class="status"></div>
     </div>
 
@@ -884,18 +883,7 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Widget URL</div>
-      <div class="api-config">
-        <p style="font-size: 11px; color: #8b9dc3; margin-bottom: 12px;">
-          Copy your Now Playing widget URL to use in OBS Browser Source
-        </p>
-        <button id="copy-widget-url-btn" class="secondary" style="width: 100%; padding: 12px; margin-bottom: 0;">
-          <span>📋 Copy Widget URL</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="section">
+      <button id="collect-bonuses-btn" class="secondary" style="margin-bottom: 20px;"><span>🎰 Collect Bonuses</span></button>
       <button id="back-to-main-btn" class="secondary" style="display: none; margin-bottom: 20px;"><span>← Back to Main</span></button>
       <div class="section-title">Win Recording</div>
       <div class="win-recording-grid">
@@ -923,17 +911,15 @@
         <button id="discord-login-btn" style="background: linear-gradient(135deg, #5865F2 0%, #4752C4 100%); margin-bottom: 12px;">
           <span>🔐 Login with Discord</span>
         </button>
-        <!-- Hidden API Base URL field (still needed for functionality) -->
-        <input type="hidden" id="api-base-url" value="https://huntmaster.vercel.app" />
-        <div id="manual-auth-section" style="display: none;">
-          <div style="text-align: center; margin: 12px 0; color: #8b9dc3; font-size: 11px;">OR</div>
-          <label>Session Token:</label>
-          <input type="password" id="session-token" placeholder="Paste your session token here" />
-          <p>
-            Copy your session token from HuntMaster dashboard (Click "Copy ID for Browser Extension") and paste it here. This only needs to be done once and will persist until you log out.
-          </p>
-          <button id="save-config-btn" class="secondary"><span>Save Configuration</span></button>
-        </div>
+        <div style="text-align: center; margin: 12px 0; color: #8b9dc3; font-size: 11px;">OR</div>
+        <label>API Base URL:</label>
+        <input type="text" id="api-base-url" placeholder="https://huntmaster.vercel.app" />
+        <label style="margin-top: 12px;">Session Token:</label>
+        <input type="password" id="session-token" placeholder="Paste your session token here" />
+        <p>
+          Copy your session token from HuntMaster dashboard (Click "Copy ID for Browser Extension") and paste it here. This only needs to be done once and will persist until you log out.
+        </p>
+        <button id="save-config-btn" class="secondary"><span>Save Configuration</span></button>
         <button id="logout-btn" class="secondary" style="margin-top: 8px; display: none;"><span>Logout</span></button>
       </div>
     </div>

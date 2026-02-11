@@ -13,20 +13,28 @@
       'nlc': 'NoLimit City', // NLC is abbreviation for NoLimit City
       'nolimit': 'NoLimit City', // Full name variant
       'nolimit city': 'NoLimit City',
+      'nolimit-city': 'NoLimit City', // URL format
       'pragmatic play': 'Pragmatic Play', // Full name
       'pragmatic-play': 'Pragmatic Play', // URL format
       'pragmatic': 'Pragmatic Play', // Short name maps to full name
       'playngo': 'Play\'n GO',
       'play\'n go': 'Play\'n GO',
+      'play-n-go': 'Play\'n GO', // Videoslots URL format
       'netent': 'NetEnt',
       'net entertainment': 'NetEnt',
       'microgaming': 'Microgaming',
       'evolution': 'Evolution',
       'red tiger': 'Red Tiger',
+      'red-tiger': 'Red Tiger', // URL format
       'push gaming': 'Push Gaming',
+      'push-gaming': 'Push Gaming', // URL format
       'yggdrasil': 'Yggdrasil',
       'big time gaming': 'Big Time Gaming',
+      'big-time-gaming': 'Big Time Gaming', // URL format
       'relax gaming': 'Relax Gaming',
+      'relax-gaming': 'Relax Gaming', // URL format
+      'net entertainment': 'NetEnt',
+      'net-entertainment': 'NetEnt', // URL format
     };
     
     let formatted = provider.toLowerCase().trim();
@@ -60,11 +68,166 @@
     return formatted;
   }
 
+  // Convert a slug like "pirates-plenty" into "Pirates Plenty"
+  // Also handles version numbers at the end (e.g., "phoenixduelreels94" -> "Phoenix Duelreels")
+  function slugToTitle(slug) {
+    if (!slug) return null;
+    
+    // Strip trailing 2-3 digit version numbers (common pattern like "94", "100", "202")
+    // But keep single digits (could be "Game 2") and longer numbers (could be "2024", "1000")
+    let cleanedSlug = slug;
+    const versionNumberMatch = cleanedSlug.match(/^(.+?)(\d{2,3})$/);
+    if (versionNumberMatch) {
+      const baseName = versionNumberMatch[1];
+      const versionDigits = versionNumberMatch[2];
+      
+      // Only strip if the base name is at least 3 characters (reasonable game name)
+      // and the version is 2-3 digits (common version pattern)
+      if (baseName.length >= 3 && versionDigits.length >= 2 && versionDigits.length <= 3) {
+        cleanedSlug = baseName;
+      }
+    }
+    
+    return cleanedSlug
+      .split('-')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+      .trim();
+  }
+
+  // Known provider slugs (with dashes) - ordered by length (longest first) to match multi-word providers first
+  // This is used across all casino parsers to correctly identify multi-word providers
+  const KNOWN_PROVIDER_SLUGS = [
+    'play-n-go',          // Play'n GO
+    'pragmatic-play',     // Pragmatic Play
+    'nolimit-city',       // NoLimit City
+    'red-tiger',          // Red Tiger
+    'push-gaming',        // Push Gaming
+    'big-time-gaming',    // Big Time Gaming
+    'relax-gaming',       // Relax Gaming
+    'net-entertainment',  // NetEnt
+    'nolimit',            // NoLimit City (short)
+    'pragmatic',          // Pragmatic Play (short)
+    'playngo',            // Play'n GO (no dashes)
+    'netent',             // NetEnt (no dashes)
+    'microgaming',        // Microgaming
+    'evolution',          // Evolution
+    'yggdrasil',          // Yggdrasil
+  ];
+
+  // Extract provider slug from a combined slug string (e.g., "game-name-play-n-go")
+  // Returns { gameSlug, providerSlug } or null if extraction fails
+  function extractProviderFromSlug(slugPart) {
+    if (!slugPart) return null;
+
+    // Try to match known provider slugs from the end of the URL
+    for (const providerPattern of KNOWN_PROVIDER_SLUGS) {
+      // Check if the slug ends with this provider pattern
+      if (slugPart.endsWith(providerPattern)) {
+        // Extract the provider and game parts
+        const providerStartIndex = slugPart.length - providerPattern.length;
+        // Make sure there's a dash before the provider (or it's at the start)
+        if (providerStartIndex === 0 || slugPart[providerStartIndex - 1] === '-') {
+          const gameSlug = slugPart.substring(0, providerStartIndex > 0 ? providerStartIndex - 1 : 0);
+          const providerSlug = providerPattern;
+          return { gameSlug, providerSlug };
+        }
+      }
+    }
+    
+    // If no known provider matched, fall back to splitting on the last dash
+    const lastDashIndex = slugPart.lastIndexOf('-');
+    if (lastDashIndex === -1) {
+      // No dash found, treat entire slug as game name
+      return { gameSlug: slugPart, providerSlug: null };
+    }
+    
+    const gameSlug = slugPart.substring(0, lastDashIndex);
+    const providerSlug = slugPart.substring(lastDashIndex + 1);
+    return { gameSlug, providerSlug };
+  }
+
+  // Parse bc.game URLs of the form https://bc.game/game/{game-slug}-by-{provider-slug}
+  function parseBcGameFromUrl(url) {
+    if (!url) return null;
+    const match = url.toLowerCase().match(/bc\.game\/game\/([^/?#]+)/);
+    if (!match || !match[1]) return null;
+
+    const slugPart = match[1];
+    const parts = slugPart.split('-by-');
+    if (parts.length < 2 || !parts[0]) return null;
+
+    const gameSlug = parts[0];
+    // Everything after "-by-" is the provider slug (may contain multiple dashes for multi-word providers)
+    const providerSlug = parts.slice(1).join('-by-');
+
+    const title = slugToTitle(gameSlug);
+    // formatProviderName already handles multi-word providers like "play-n-go" correctly
+    const provider = providerSlug ? formatProviderName(providerSlug.replace(/-/g, ' ')) : null;
+
+    if (!title) return null;
+    return { title, provider };
+  }
+
+  // Parse Videoslots URLs of the form https://www.videoslots.com/play/{game-slug}-{provider-slug}/
+  function parseVideoslotsFromUrl(url) {
+    if (!url) return null;
+    const match = url.toLowerCase().match(/videoslots\.com\/play\/([^/?#]+)/);
+    if (!match || !match[1]) return null;
+
+    const slugPart = match[1];
+    
+    // Use shared function to extract provider from slug
+    const extracted = extractProviderFromSlug(slugPart);
+    if (!extracted) {
+      // No valid extraction, treat entire slug as game name
+      const title = slugToTitle(slugPart);
+      if (!title) return null;
+      return { title, provider: null };
+    }
+
+    const { gameSlug, providerSlug } = extracted;
+    const title = slugToTitle(gameSlug);
+    const provider = providerSlug ? formatProviderName(providerSlug.replace(/-/g, ' ')) : null;
+
+    if (!title) return null;
+    return { title, provider };
+  }
+
+  // Parse Vave URLs of the form:
+  // https://vave.com/casino/game/{provider-slug}/{game-slug}
+  // https://vave.com/live-casino/game/{provider-slug}/{game-slug}
+  function parseVaveFromUrl(url) {
+    if (!url) return null;
+    // Match both /casino/game/ and /live-casino/game/ patterns
+    const match = url.toLowerCase().match(/vave\.com\/(?:casino|live-casino)\/game\/([^/?#]+)\/([^/?#]+)/);
+    if (!match || !match[1] || !match[2]) return null;
+
+    const providerSlug = match[1];
+    const gameSlug = match[2];
+
+    const title = slugToTitle(gameSlug);
+    const provider = providerSlug ? formatProviderName(providerSlug.replace(/-/g, ' ')) : null;
+
+    if (!title) return null;
+    return { title, provider };
+  }
+
   // Casino-specific detection logic
   function detectCasino() {
     const hostname = window.location.hostname.toLowerCase();
     const url = window.location.href.toLowerCase();
     
+    if (hostname.includes('bc.game') || url.includes('bc.game/game')) {
+      return 'bcgame';
+    }
+    if (hostname.includes('videoslots') || url.includes('videoslots.com/play')) {
+      return 'videoslots';
+    }
+    if (hostname.includes('vave') || url.includes('vave.com/casino/game') || url.includes('vave.com/live-casino/game')) {
+      return 'vave';
+    }
     if (hostname.includes('gamba') || url.includes('gamba')) {
       return 'gamba';
     }
@@ -78,6 +241,14 @@
 
   // Casino-specific title parsers
   function parseTitleForCasino(title, casino) {
+    if (casino === 'bcgame') {
+      // Prefer parsing directly from URL structure
+      const fromUrl = parseBcGameFromUrl(window.location.href);
+      if (fromUrl) {
+        return { title: fromUrl.title, provider: fromUrl.provider || null };
+      }
+    }
+
     if (casino === 'gamba') {
       // Gamba format: "Game Name by Provider Name - Play Online at Gamba"
       // Example: "Bangkok Hilton by Nolimit City - Play Online at Gamba"
@@ -302,6 +473,79 @@
     }
   ];
 
+  // List of invalid game names that should never be detected as games
+  const INVALID_GAME_NAMES = [
+    'casino', 'casinos', 'cryptocasino', 'gamba',
+    'home', 'lobby', 'main', 'index', 'welcome',
+    'login', 'register', 'sign in', 'sign up',
+    'account', 'profile', 'settings', 'help', 'support',
+    'deposit', 'withdraw', 'cashier', 'banking',
+    'promotions', 'bonuses', 'vip', 'rewards',
+    'terms', 'privacy', 'about', 'contact'
+  ];
+
+  // Check if a game title is invalid (generic casino terms, etc.)
+  function isValidGameTitle(title) {
+    if (!title || !title.trim()) return false;
+    
+    const titleLower = title.toLowerCase().trim();
+    
+    // Check against invalid names list (exact match)
+    if (INVALID_GAME_NAMES.includes(titleLower)) {
+      return false;
+    }
+    
+    // Check if title CONTAINS invalid casino terms (not just exact match)
+    const casinoTerms = [
+      'casino', 'casinos', 'cryptocasino', 'gamba',
+      'home', 'lobby', 'main', 'index', 'welcome',
+      'login', 'register', 'sign in', 'sign up',
+      'account', 'profile', 'settings', 'help', 'support',
+      'deposit', 'withdraw', 'cashier', 'banking',
+      'promotions', 'bonuses', 'vip', 'rewards',
+      'terms', 'privacy', 'about', 'contact',
+      'online casino', 'play online', 'free play', 'demo play'
+    ];
+    
+    // If title contains any casino term as a whole word, reject it
+    for (const term of casinoTerms) {
+      // Use word boundary regex to match whole words only
+      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(titleLower)) {
+        console.log('[HuntMaster Extension] Rejected title containing casino term:', term, 'in:', title);
+        return false;
+      }
+    }
+    
+    // Check if title is just a domain name
+    if (titleLower.match(/^[a-z0-9-]+\.(com|net|org|io)$/)) {
+      return false;
+    }
+    
+    // Check if title is too short (likely not a game name)
+    if (titleLower.length < 3) {
+      return false;
+    }
+    
+    // Check if title is just common casino words
+    const commonCasinoWords = ['play', 'game', 'slot', 'casino', 'online'];
+    if (commonCasinoWords.includes(titleLower)) {
+      return false;
+    }
+    
+    // Reject if title looks like a page title (contains "|" or " - " with common page terms)
+    if (titleLower.includes('|') || titleLower.includes(' - ')) {
+      const pageTerms = ['home', 'lobby', 'casino', 'games', 'slots', 'live casino', 'sports'];
+      const hasPageTerm = pageTerms.some(term => titleLower.includes(term));
+      if (hasPageTerm) {
+        console.log('[HuntMaster Extension] Rejected title that looks like a page title:', title);
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
   function extractGameInfo() {
     const gameInfo = {
       title: null,
@@ -313,6 +557,39 @@
 
     // Detect which casino site we're on
     const casino = detectCasino();
+
+    // For bc.game, parse directly from URL before trying titles/DOM
+    if (casino === 'bcgame') {
+      const bcGameInfo = parseBcGameFromUrl(window.location.href);
+      if (bcGameInfo && bcGameInfo.title && isValidGameTitle(bcGameInfo.title)) {
+        gameInfo.title = bcGameInfo.title;
+        gameInfo.provider = bcGameInfo.provider || null;
+        gameInfo.source = 'bcgame-url';
+        // Still fall through to allow additional data (stake/win) detection
+      }
+    }
+
+    // For Videoslots, parse directly from URL before trying titles/DOM
+    if (casino === 'videoslots') {
+      const videoslotsInfo = parseVideoslotsFromUrl(window.location.href);
+      if (videoslotsInfo && videoslotsInfo.title && isValidGameTitle(videoslotsInfo.title)) {
+        gameInfo.title = videoslotsInfo.title;
+        gameInfo.provider = videoslotsInfo.provider || null;
+        gameInfo.source = 'videoslots-url';
+        // Still fall through to allow additional data (stake/win) detection
+      }
+    }
+
+    // For Vave, extract provider from URL but prefer page title for game name
+    if (casino === 'vave') {
+      const vaveInfo = parseVaveFromUrl(window.location.href);
+      if (vaveInfo && vaveInfo.provider) {
+        // Always use provider from URL for Vave
+        gameInfo.provider = vaveInfo.provider;
+        gameInfo.source = 'vave-url';
+      }
+      // Title will be set from page title/metadata below if available
+    }
     
     // Try title-based detection first
     const pageTitle = document.title.trim();
@@ -320,36 +597,54 @@
       // Try casino-specific parser first
       const casinoSpecific = parseTitleForCasino(pageTitle, casino);
       if (casinoSpecific && casinoSpecific.title) {
-        // Only reject if it's clearly just a domain name (very short with .com)
-        const titleLower = casinoSpecific.title.toLowerCase().trim();
-        const isInvalidTitle = 
-          (titleLower.match(/^[a-z0-9-]+\.(com|net|org)$/)) || // Exact domain match like "cryptocasino.com"
-          titleLower === 'cryptocasino' ||
-          titleLower === 'casino';
-        
-        if (!isInvalidTitle) {
+        // Validate the extracted title using the comprehensive validation function
+        if (isValidGameTitle(casinoSpecific.title)) {
           gameInfo.title = casinoSpecific.title;
-          gameInfo.provider = casinoSpecific.provider || null;
-          gameInfo.source = `page-title-${casino}`;
+          // Only set provider if not already set from URL (for Vave, provider comes from URL)
+          if (!gameInfo.provider) {
+            gameInfo.provider = casinoSpecific.provider || null;
+          }
+          gameInfo.source = gameInfo.source || `page-title-${casino}`;
         }
       }
       
       // If casino-specific parser didn't find a valid game, fall back to generic patterns
       if (!gameInfo.title) {
-        // Fall back to generic patterns
-        for (const pattern of detectionPatterns[0].patterns) {
-          const match = pageTitle.match(pattern);
-          if (match) {
-            gameInfo.title = match[1].trim();
-            if (match[2]) {
-              // Try to extract provider
-              const providerMatch = match[2].match(/^(.+?)(?:\s*\||\s*-\s*|$)/);
-              if (providerMatch) {
-                gameInfo.provider = providerMatch[1].trim();
+        // First check for "Game Name by Provider" format (common on many casinos)
+        const byPattern = /^(.+?)\s+by\s+(.+?)(?:\s*-\s*|\s*\||$)/i;
+        const byMatch = pageTitle.match(byPattern);
+        if (byMatch) {
+          const extractedTitle = byMatch[1].trim();
+          if (isValidGameTitle(extractedTitle)) {
+            gameInfo.title = extractedTitle;
+            // Only set provider if not already set from URL (for Vave, provider comes from URL)
+            if (!gameInfo.provider && byMatch[2]) {
+              gameInfo.provider = formatProviderName(byMatch[2].trim());
+            }
+            gameInfo.source = gameInfo.source || 'page-title';
+          }
+        }
+        
+        // Fall back to other generic patterns if "by" pattern didn't match
+        if (!gameInfo.title) {
+          for (const pattern of detectionPatterns[0].patterns) {
+            const match = pageTitle.match(pattern);
+            if (match) {
+              const extractedTitle = match[1].trim();
+              // Validate the extracted title before using it
+              if (isValidGameTitle(extractedTitle)) {
+                gameInfo.title = extractedTitle;
+                if (match[2]) {
+                  // Try to extract provider (but don't override if already set from URL for Vave)
+                  const providerMatch = match[2].match(/^(.+?)(?:\s*\||\s*-\s*|$)/);
+                  if (providerMatch && !gameInfo.provider) {
+                    gameInfo.provider = formatProviderName(providerMatch[1].trim());
+                  }
+                }
+                gameInfo.source = gameInfo.source || 'page-title';
+                break;
               }
             }
-            gameInfo.source = 'page-title';
-            break;
           }
         }
       }
@@ -359,7 +654,7 @@
         // Simple heuristic: if title doesn't contain common non-game words, assume it's a game
         const commonWords = ['login', 'register', 'deposit', 'withdraw', 'account', 'help', 'support'];
         const lowerTitle = pageTitle.toLowerCase();
-        if (!commonWords.some(word => lowerTitle.includes(word))) {
+        if (!commonWords.some(word => lowerTitle.includes(word)) && isValidGameTitle(pageTitle)) {
           gameInfo.title = pageTitle;
           gameInfo.source = 'page-title-fallback';
         }
@@ -383,9 +678,12 @@
               if (casino === 'cryptocasino' && text.match(/^Play\s+/i)) {
                 text = text.replace(/^Play\s+/i, '').trim();
               }
-              gameInfo.title = text;
-              gameInfo.source = 'dom-selector';
-              break;
+              // Validate the extracted title
+              if (isValidGameTitle(text)) {
+                gameInfo.title = text;
+                gameInfo.source = 'dom-selector';
+                break;
+              }
             }
           }
         } catch (e) {
@@ -406,9 +704,12 @@
               if (casino === 'cryptocasino' && content.match(/^Play\s+/i)) {
                 content = content.replace(/^Play\s+/i, '').trim();
               }
-              gameInfo.title = content;
-              gameInfo.source = 'meta-tag';
-              break;
+              // Validate the extracted title
+              if (isValidGameTitle(content)) {
+                gameInfo.title = content;
+                gameInfo.source = 'meta-tag';
+                break;
+              }
             }
           }
         } catch (e) {
@@ -682,11 +983,49 @@
   // Detect on page load (with slight delay to let page load)
   setTimeout(sendGameInfo, 500);
 
+  // Track URL changes for SPA navigation (event-driven, no polling)
+  let lastUrl = window.location.href;
+  
+  // Intercept History API calls for SPA navigation (pushState/replaceState)
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  history.pushState = function(...args) {
+    originalPushState.apply(history, args);
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      console.log('[HuntMaster Extension] Navigation detected (pushState), detecting game:', currentUrl);
+      setTimeout(sendGameInfo, 500);
+    }
+  };
+  
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(history, args);
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      console.log('[HuntMaster Extension] Navigation detected (replaceState), detecting game:', currentUrl);
+      setTimeout(sendGameInfo, 500);
+    }
+  };
+  
+  // Listen for popstate events (back/forward navigation)
+  window.addEventListener('popstate', () => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      console.log('[HuntMaster Extension] Navigation detected (popstate), detecting game:', currentUrl);
+      setTimeout(sendGameInfo, 500);
+    }
+  });
+
   // Watch for title changes (some casino sites load games dynamically)
   let lastTitle = document.title;
   const titleObserver = new MutationObserver(() => {
     if (document.title !== lastTitle) {
       lastTitle = document.title;
+      console.log('[HuntMaster Extension] Title changed, detecting game:', document.title);
       setTimeout(sendGameInfo, 500); // Debounce
     }
   });

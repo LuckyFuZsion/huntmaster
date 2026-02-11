@@ -11,8 +11,6 @@ function normalizeGameTitle(title) {
   return title
     .toLowerCase()
     .trim()
-    .replace(/&/g, ' and ') // Replace & with " and "
-    .replace(/\band\b/g, ' and ') // Normalize "and" to ensure consistent spacing
     .replace(/[-–—]/g, ' ') // Replace hyphens, en-dashes, em-dashes with spaces
     .replace(/\s+/g, ' ') // Replace multiple spaces with single space
     .trim();
@@ -204,11 +202,20 @@ async function autoUpdateCurrentGame(gameInfo) {
       }
     }
     
-    // Update the current game via API immediately (don't wait for database check)
+    // Check if game exists in database (for logging/info purposes, but don't block update)
     const gameTitleTrimmed = gameInfo.title.trim();
-    console.log('[HuntMaster Extension] Proceeding with auto-update:', gameTitleTrimmed);
+    console.log('[HuntMaster Extension] 🔍 Checking if game exists in database:', gameTitleTrimmed);
+    const gameExists = await checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken);
     
-    // Update widget immediately - don't block on database check
+    if (gameExists) {
+      console.log('[HuntMaster Extension] ✅ Game found in database - proceeding with auto-update');
+    } else {
+      console.log('[HuntMaster Extension] ⚠️ Game NOT found in database, but proceeding with auto-update anyway');
+      console.log('[HuntMaster Extension] 💡 Tip: Game will be updated even if not in database');
+    }
+    
+    // Update the current game via API (regardless of database check result)
+    console.log('[HuntMaster Extension] Proceeding with auto-update:', gameTitleTrimmed);
     const response = await fetch(`${apiBaseUrl}/api/current-game/set`, {
       method: 'POST',
       headers: {
@@ -236,17 +243,6 @@ async function autoUpdateCurrentGame(gameInfo) {
     } else {
       console.error('[HuntMaster Extension] Auto-update failed:', data.error);
     }
-    
-    // Check if game exists in database in the background (non-blocking, for logging only)
-    checkGameExists(gameTitleTrimmed, apiBaseUrl, sessionToken).then(gameExists => {
-      if (gameExists) {
-        console.log('[HuntMaster Extension] ✅ Game found in database');
-      } else {
-        console.log('[HuntMaster Extension] ⚠️ Game NOT found in database');
-      }
-    }).catch(err => {
-      console.error('[HuntMaster Extension] Database check error:', err);
-    });
   } catch (error) {
     console.error('[HuntMaster Extension] Auto-update error:', error);
   }
@@ -258,25 +254,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   chrome.storage.local.get(['lockedTabId'], (result) => {
     const lockedTabId = result.lockedTabId;
     
-    // For GAME_DETECTED messages, strictly enforce tab lock
-    if (message.type === 'GAME_DETECTED') {
-      // If locked and this message is not from the locked tab, ignore it completely
-      // Messages from popup (no sender.tab) are always allowed
-      if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
-        console.log('[HuntMaster Extension] BLOCKING GAME_DETECTED from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
-        sendResponse({ success: true }); // Send response but don't process
-        return; // Exit early, don't process
-      }
-    } else {
-      // For other message types, allow if from popup or not locked
-      if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
-        console.log('[HuntMaster Extension] Ignoring message from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
-        sendResponse({ success: false, error: 'Tab is locked to another tab' });
-        return; // Exit early
-      }
+    // If locked and this message is not from the locked tab, ignore it
+    if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
+      console.log('[HuntMaster Extension] Ignoring message from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
+      return false; // Ignore message
     }
     
-    // Process message normally (only reaches here if tab lock check passed)
+    // Process message normally
     handleMessage(message, sender, sendResponse, lockedTabId);
   });
   
@@ -299,24 +283,8 @@ function handleMessage(message, sender, sendResponse, lockedTabId) {
   }
   
   if (message.type === 'GAME_DETECTED') {
-    console.log('[HuntMaster Extension Background] Received GAME_DETECTED:', message.data, 'from tab:', sender.tab?.id, 'lockedTabId:', lockedTabId);
-    
-    // Only process if not locked, or if this message is from the locked tab
-    // The check at the listener level should have already filtered this, but double-check here for safety
-    if (lockedTabId && sender.tab && sender.tab.id !== lockedTabId) {
-      console.log('[HuntMaster Extension Background] Ignoring GAME_DETECTED from non-locked tab:', sender.tab.id, 'Locked to:', lockedTabId);
-      sendResponse({ success: true });
-      return;
-    }
-    
-    // Log that we're processing this message (either no lock, or from locked tab)
-    if (lockedTabId) {
-      console.log('[HuntMaster Extension Background] Processing GAME_DETECTED from locked tab:', sender.tab?.id);
-    } else {
-      console.log('[HuntMaster Extension Background] Processing GAME_DETECTED (no lock active)');
-    }
-    
-    // Store detected game info (only from allowed tab)
+    console.log('[HuntMaster Extension Background] Received GAME_DETECTED:', message.data);
+    // Store detected game info
     chrome.storage.local.set({
       lastDetectedGame: message.data,
       lastDetectedTime: Date.now()
@@ -333,26 +301,20 @@ function handleMessage(message, sender, sendResponse, lockedTabId) {
       chrome.storage.local.get(['recentGames'], (result) => {
         let recentGames = result.recentGames || [];
         
-        // Check if this game is already in the list (by title and provider)
-        // Normalize "and" and "&" to be equivalent for comparison
+        // Normalize game key for comparison (case-insensitive, trimmed)
         const normalizeKey = (title, provider) => {
-          let normalizedTitle = (title || '').toLowerCase().trim();
-          let normalizedProvider = (provider || '').toLowerCase().trim();
-          // Normalize "and" and "&" to be equivalent
-          normalizedTitle = normalizedTitle.replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
-          normalizedProvider = normalizedProvider.replace(/&/g, ' and ').replace(/\band\b/g, ' and ').replace(/\s+/g, ' ').trim();
+          const normalizedTitle = (title || '').toLowerCase().trim();
+          const normalizedProvider = (provider || '').toLowerCase().trim();
           return `${normalizedTitle}|${normalizedProvider}`;
         };
         
-        const gameKey = normalizeKey(message.data.title, message.data.provider);
-        const existingIndex = recentGames.findIndex(g => 
-          normalizeKey(g.title, g.provider) === gameKey
-        );
+        const newGameKey = normalizeKey(message.data.title, message.data.provider);
         
-        if (existingIndex !== -1) {
-          // Remove existing entry to move it to the front
-          recentGames.splice(existingIndex, 1);
-        }
+        // Remove ALL duplicates (not just the first one) to prevent duplicates
+        recentGames = recentGames.filter(g => {
+          const existingKey = normalizeKey(g.title, g.provider);
+          return existingKey !== newGameKey;
+        });
         
         // Add new game to the front with timestamp
         const gameWithTime = {
