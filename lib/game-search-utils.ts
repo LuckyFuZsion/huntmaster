@@ -12,9 +12,13 @@ export interface GameSearchResult {
   source: GameSearchSource
 }
 
-/** `game_reviews` uses `developer` for studio name (no `provider` column in DB). */
+/** Columns that exist on `game_reviews` (no `provider` or `features` in this schema). */
 export const GAME_REVIEWS_SELECT =
-  "id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date, features"
+  "id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date"
+
+/** Minimal select if a deployment has fewer columns. */
+export const GAME_REVIEWS_SELECT_MINIMAL =
+  "id, slug, title, developer, thumbnail_url, max_win"
 
 export const SLOTSLAUNCH_SELECT =
   "id, slug, name, provider, provider_slug, thumbnail_url, banner_url, max_win, volatility, release_date"
@@ -104,11 +108,8 @@ export function dedupeKeyByTitle(item: { title?: string }): string {
 }
 
 export function mapGameReviewRow(g: Record<string, unknown>): GameSearchResult {
-  const technicalSpecs = (g.features as Record<string, unknown> | undefined)?.technical_specs as
-    | Record<string, unknown>
-    | undefined
-  const maxWinVal = g.max_win ?? technicalSpecs?.max_win
-  const volatilityVal = g.volatility ?? technicalSpecs?.volatility
+  const maxWinVal = g.max_win
+  const volatilityVal = g.volatility
 
   const title = String(g.title ?? "")
   return {

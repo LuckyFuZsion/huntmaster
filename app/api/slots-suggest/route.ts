@@ -3,6 +3,7 @@ import { supabaseAdmin, getSupabaseClient } from "@/lib/supabase-admin";
 import { decrypt } from "@/lib/protection";
 import {
   GAME_REVIEWS_SELECT,
+  GAME_REVIEWS_SELECT_MINIMAL,
   pickExactGameMatch,
   SLOTSLAUNCH_SELECT,
   filterExactTitleMatches,
@@ -111,7 +112,7 @@ export async function GET(request: Request) {
 
     // Check cache for all requests (including browser extension)
     // Cached requests don't count toward API usage limits
-    const cacheKey = `slots-suggest:v5:${q.toLowerCase().trim()}:${limit}:${exhaustive ? "1" : "0"}:${page || "1"}:${providerFilter || ""}`
+    const cacheKey = `slots-suggest:v6:${q.toLowerCase().trim()}:${limit}:${exhaustive ? "1" : "0"}:${page || "1"}:${providerFilter || ""}`
     const cached = getCached(cacheKey)
     if (cached) {
       // Apply filtering to cached results to ensure they match the query
@@ -213,18 +214,36 @@ export async function GET(request: Request) {
     
     let hasExactInReviews = false;
 
+    let gameReviewsError: string | undefined;
+
     try {
       const supabase = getSupabaseClient();
 
-      const { data: gameReviews, error: ssError } = await supabase
+      let gameReviews: Record<string, unknown>[] | null = null;
+      let ssError: { message: string } | null = null;
+
+      const reviewsResult = await supabase
         .from("game_reviews")
         .select(GAME_REVIEWS_SELECT)
         .or(`title.ilike.%${q}%,title.ilike.%${normalizedQ}%`)
         .limit(Math.max(limit, 50));
 
-      // Title-only search; studio name is read from `developer` column
+      gameReviews = reviewsResult.data as Record<string, unknown>[] | null;
+      ssError = reviewsResult.error;
 
       if (ssError) {
+        console.warn(`game_reviews query failed, retrying minimal select:`, ssError.message);
+        const fallback = await supabase
+          .from("game_reviews")
+          .select(GAME_REVIEWS_SELECT_MINIMAL)
+          .or(`title.ilike.%${q}%,title.ilike.%${normalizedQ}%`)
+          .limit(Math.max(limit, 50));
+        gameReviews = fallback.data as Record<string, unknown>[] | null;
+        ssError = fallback.error;
+      }
+
+      if (ssError) {
+        gameReviewsError = ssError.message;
         console.error(`Error querying game_reviews table:`, ssError);
       } else {
         const broadMapped = (gameReviews || []).map((g) => mapGameReviewRow(g as Record<string, unknown>));
@@ -460,6 +479,7 @@ export async function GET(request: Request) {
       hasExactInReviews,
       resolvedSource,
       searchMode: providerFilter ? "title+provider" : "title-only",
+      ...(gameReviewsError ? { gameReviewsError } : {}),
       usedFallback: usedSlotsLaunch,
       slotStreamersResults: ssItems.length,
       slotsLaunchResults: slGames.length,

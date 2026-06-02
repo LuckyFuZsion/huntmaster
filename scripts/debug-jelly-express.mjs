@@ -29,18 +29,19 @@ if (!url || !key) {
 const sb = createClient(url, key);
 const q = "Jelly Express";
 
-const sel = "id, slug, title, developer, provider, thumbnail_url, max_win";
 const selLegacy = "id, slug, title, developer, thumbnail_url, max_win";
+const selFull =
+  "id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date, features";
 
 async function main() {
-  console.log("=== game_reviews (with provider column) ===");
+  console.log("=== game_reviews (GAME_REVIEWS_SELECT columns) ===");
   let { data, error } = await sb
     .from("game_reviews")
-    .select(sel)
+    .select(selFull)
     .or(`title.ilike.%${q}%`)
     .limit(20);
   if (error) {
-    console.log("Error with provider col:", error.message);
+    console.log("Error with full select:", error.message);
     ({ data, error } = await sb
       .from("game_reviews")
       .select(selLegacy)
