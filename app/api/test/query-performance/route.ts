@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getSupabaseAdminClient } from "@/lib/supabase-admin"
+import { getSupabaseClient as getSupabaseAdminClient } from "@/lib/supabase-admin"
 
 // Test endpoint to verify query performance and index usage
 export async function GET(request: Request) {

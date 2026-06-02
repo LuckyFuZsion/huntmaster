@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -67,7 +67,7 @@ const formatCurrency = (amount: number) => {
   }).format(amount)
 }
 
-export default function WinsDashboardPage() {
+function WinsDashboardContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [username, setUsername] = useState("")
@@ -615,6 +615,14 @@ export default function WinsDashboardPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function WinsDashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
+      <WinsDashboardContent />
+    </Suspense>
   )
 }
 
