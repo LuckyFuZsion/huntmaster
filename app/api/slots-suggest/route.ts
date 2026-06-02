@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, getSupabaseClient } from "@/lib/supabase-admin";
 import { decrypt } from "@/lib/protection";
+import {
+  GAME_REVIEWS_SELECT,
+  SLOTSLAUNCH_SELECT,
+  hasExactTitleMatch,
+  mapGameReviewRow,
+  mapSlotsLaunchRow,
+  mergeGameSearchResults,
+  normalizeGameTitle,
+  prependUniqueByTitle,
+  rankGameSearchResults,
+  type GameSearchResult,
+} from "@/lib/game-search-utils";
 
 // Set max duration for database queries
 export const maxDuration = 20 // 20 seconds max
@@ -49,6 +61,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
     const q = searchParams.get("q") || searchParams.get("title") || "";
+    const providerFilter = searchParams.get("provider") || searchParams.get("developer") || undefined;
     const limit = Number(searchParams.get("limit") || 10);
     const page = searchParams.get("page") || undefined;
     const exhaustive = searchParams.get("exhaustive") === "1" || searchParams.get("exhaustive") === "true";
@@ -83,6 +96,7 @@ export async function GET(request: Request) {
     
     // Create normalized query for better matching
     const normalizedQ = normalizeSearchQuery(q);
+    const trimmedQ = q.trim();
 
     // Removed: User slots check optimization
     // This was preventing searches from getting all matching games from external APIs
@@ -90,7 +104,7 @@ export async function GET(request: Request) {
 
     // Check cache for all requests (including browser extension)
     // Cached requests don't count toward API usage limits
-    const cacheKey = `slots-suggest:${q.toLowerCase().trim()}:${limit}:${exhaustive ? '1' : '0'}:${page || '1'}`
+    const cacheKey = `slots-suggest:v2:${q.toLowerCase().trim()}:${limit}:${exhaustive ? "1" : "0"}:${page || "1"}:${providerFilter || ""}`
     const cached = getCached(cacheKey)
     if (cached) {
       // Apply filtering to cached results to ensure they match the query
@@ -166,50 +180,48 @@ export async function GET(request: Request) {
     slotStreamersCallCount++
     console.log(`🔍 Searching game_reviews table for: "${q}" (Query #${slotStreamersCallCount})`);
     
-    let ssItems: any[] = [];
+    let ssItems: GameSearchResult[] = [];
     let ssRateLimited = false; // No rate limiting for database queries
     
     try {
-      // Query game_reviews table with case-insensitive search on title
-      // Using ilike for case-insensitive pattern matching
-      // Use both original query and normalized query to catch "&" vs "and" variations
-      // Only select columns that exist in the database
-      const { data: gameReviews, error: ssError } = await getSupabaseClient()
-        .from('game_reviews')
-        .select('id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date, features')
+      const supabase = getSupabaseClient();
+      const exactReviewRows: Record<string, unknown>[] = [];
+
+      // 1) Exact title match first — avoids broad %query% + limit pushing the real game out
+      const exactTitleQuery = supabase
+        .from("game_reviews")
+        .select(GAME_REVIEWS_SELECT)
+        .ilike("title", trimmedQ);
+
+      const { data: exactReviews, error: exactError } = providerFilter
+        ? await exactTitleQuery.ilike("developer", `%${providerFilter}%`).limit(5)
+        : await exactTitleQuery.limit(5);
+
+      if (exactError) {
+        console.error("Error querying exact game_reviews match:", exactError);
+      } else if (exactReviews?.length) {
+        exactReviewRows.push(...exactReviews);
+      }
+
+      // 2) Broad substring search for autocomplete / suggestions
+      const { data: gameReviews, error: ssError } = await supabase
+        .from("game_reviews")
+        .select(GAME_REVIEWS_SELECT)
         .or(`title.ilike.%${q}%,title.ilike.%${normalizedQ}%`)
-        .limit(limit);
-      
+        .limit(Math.max(limit, 20));
+
       if (ssError) {
         console.error(`Error querying game_reviews table:`, ssError);
       } else {
-        // Map database fields to expected format
-        ssItems = (gameReviews || []).map((g: any) => {
-          // Check multiple possible locations for max_win
-          const maxWinVal = g.max_win ?? 
-                           g.features?.technical_specs?.max_win;
-          
-          // Check volatility
-          const volatilityVal = g.volatility ?? 
-                               g.features?.technical_specs?.volatility;
-          
-          return {
-            id: g.id,
-            slug: g.slug || g.title?.toLowerCase().replace(/\s+/g, "-") || String(g.id),
-            title: g.title,
-            provider: g.developer || undefined,
-            thumbnail: g.thumbnail_url || g.banner_url || null,
-            maxWin: (maxWinVal != null && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
-            volatility: (volatilityVal != null && String(volatilityVal).trim() !== "") ? String(volatilityVal).trim() : undefined,
-            releaseDate: (g.release_date != null && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
-          };
-        });
-        
-        console.log(`✅ game_reviews table returned ${ssItems.length} results for query: "${q}"`);
-        // Debug: Log sample titles
+        const broadMapped = (gameReviews || []).map((g) => mapGameReviewRow(g as Record<string, unknown>));
+        const exactMapped = exactReviewRows.map((g) => mapGameReviewRow(g));
+        ssItems = prependUniqueByTitle(exactMapped, broadMapped);
+
+        console.log(
+          `✅ game_reviews: ${exactMapped.length} exact + ${broadMapped.length} broad → ${ssItems.length} unique for "${q}"`,
+        );
         if (ssItems.length > 0) {
-          const sampleTitles = ssItems.slice(0, 5).map((item: any) => item.title).filter(Boolean);
-          console.log(`📋 Sample titles from game_reviews table:`, sampleTitles);
+          console.log(`📋 Sample titles from game_reviews:`, ssItems.slice(0, 5).map((item) => item.title));
         }
       }
     } catch (e) {
@@ -225,7 +237,7 @@ export async function GET(request: Request) {
     // OPTIMIZATION: Never use exhaustive mode - it's too expensive (fetches all pages = 10-20+ API calls)
     // Only fetch first page of results to keep costs low
     let slJson: any = { games: [] };
-    let slGames: any[] = [];
+    let slGames: GameSearchResult[] = [];
     let slRateLimited = false;
     let usedSlotsLaunch = false;
 
@@ -235,34 +247,20 @@ export async function GET(request: Request) {
     // we need to call SlotsLaunch to get the actual game
     const MIN_RESULTS_THRESHOLD = 5; // If Slot Streamers has < 5 results, also check SlotsLaunch
     
-    // Quick pre-filter check: see if Slot Streamers results will pass the title filter
-    // Use the same normalize function that will be used later (includes "&" and "and" normalization)
-    const normalizeForFilter = (str: string) => {
-      return (str || '')
-        .toLowerCase()
-        .trim()
-        .replace(/&/g, " and ") // Replace & with " and "
-        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
-        .replace(/[-–—]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    };
-    const normalizedQueryForFilter = normalizeForFilter(q);
-    const ssFilteredCount = ssItems.filter((item: any) => {
+    const normalizedQueryForFilter = normalizeGameTitle(q);
+    const hasExactInReviews = hasExactTitleMatch(ssItems, q);
+    const ssFilteredCount = ssItems.filter((item) => {
       if (!item.title) return false;
-      const normalizedTitle = normalizeForFilter(item.title);
-      return normalizedTitle.includes(normalizedQueryForFilter);
+      return normalizeGameTitle(item.title).includes(normalizedQueryForFilter);
     }).length;
     
-    // Call SlotsLaunch if:
-    // 1. Slot Streamers has no results, OR
-    // 2. Slot Streamers has < 5 results, OR
-    // 3. Slot Streamers is rate limited, OR
-    // 4. Slot Streamers has results but none pass the title filter (filtered count is 0 or very low)
-    const shouldUseSlotsLaunch = ssItems.length === 0 || 
-                                  ssItems.length < MIN_RESULTS_THRESHOLD || 
-                                  ssRateLimited ||
-                                  (ssItems.length >= MIN_RESULTS_THRESHOLD && ssFilteredCount === 0);
+    // Call SlotsLaunch if game_reviews did not find an exact title match and we need more coverage
+    const shouldUseSlotsLaunch =
+      !hasExactInReviews &&
+      (ssItems.length === 0 ||
+        ssItems.length < MIN_RESULTS_THRESHOLD ||
+        ssRateLimited ||
+        (ssItems.length >= MIN_RESULTS_THRESHOLD && ssFilteredCount === 0));
     
     if (ssItems.length >= MIN_RESULTS_THRESHOLD && ssFilteredCount === 0) {
       console.log(`⚠️ Slot Streamers returned ${ssItems.length} results but none pass title filter for "${q}", calling SlotsLaunch as fallback`);
@@ -277,20 +275,41 @@ export async function GET(request: Request) {
       slRateLimited = false; // No rate limiting for database queries
       
       try {
-        // Query slotslaunch_games table with case-insensitive search on name
-        // Use both original query and normalized query to catch "&" vs "and" variations
-        // Only select columns that exist in the database
-        const { data: slotsLaunchGames, error: slError } = await getSupabaseClient()
-          .from('slotslaunch_games')
-          .select('id, slug, name, provider, provider_slug, thumbnail_url, banner_url, max_win, volatility, release_date')
+        const supabase = getSupabaseClient();
+        const slExactRows: Record<string, unknown>[] = [];
+
+        const exactNameQuery = supabase
+          .from("slotslaunch_games")
+          .select(SLOTSLAUNCH_SELECT)
+          .ilike("name", trimmedQ);
+
+        const { data: exactSlGames, error: exactSlError } = providerFilter
+          ? await exactNameQuery
+              .or(`provider.ilike.%${providerFilter}%,provider_slug.ilike.%${providerFilter}%`)
+              .limit(5)
+          : await exactNameQuery.limit(5);
+
+        if (exactSlError) {
+          console.error("Error querying exact slotslaunch_games match:", exactSlError);
+        } else if (exactSlGames?.length) {
+          slExactRows.push(...exactSlGames);
+        }
+
+        const { data: slotsLaunchGames, error: slError } = await supabase
+          .from("slotslaunch_games")
+          .select(SLOTSLAUNCH_SELECT)
           .or(`name.ilike.%${q}%,name.ilike.%${normalizedQ}%`)
-          .limit(limit);
-        
+          .limit(Math.max(limit, 20));
+
         if (slError) {
           console.error(`Error querying slotslaunch_games table:`, slError);
         } else {
-          slGames = slotsLaunchGames || [];
-          console.log(`✅ slotslaunch_games table returned ${slGames.length} results (game_reviews had ${ssItems.length} results)`);
+          const broadSl = (slotsLaunchGames || []).map((g) => mapSlotsLaunchRow(g as Record<string, unknown>));
+          const exactSl = slExactRows.map((g) => mapSlotsLaunchRow(g));
+          slGames = prependUniqueByTitle(exactSl, broadSl);
+          console.log(
+            `✅ slotslaunch_games: ${exactSl.length} exact + ${broadSl.length} broad → ${slGames.length} unique (game_reviews had ${ssItems.length})`,
+          );
         }
       } catch (e) {
         console.error("Error querying slotslaunch_games table:", e);
@@ -299,93 +318,9 @@ export async function GET(request: Request) {
       console.log(`✅ Using game_reviews results only (${ssItems.length} results found, >= ${MIN_RESULTS_THRESHOLD} threshold)`);
     }
 
-    // Map SlotsLaunch games to same format (from database, not API)
-    const mappedSL = slGames.map((g: any) => {
-      // Get max_win from database
-      const maxWinVal = g.max_win;
-      
-      return {
-        id: Number(g.id) || g.id,
-        slug: g.slug || g.name?.toLowerCase().replace(/\s+/g, "-") || String(g.id),
-        title: g.name,
-        provider: g.provider || g.provider_slug || undefined,
-        thumbnail: g.thumbnail_url || g.banner_url || null,
-        maxWin: (maxWinVal != null && String(maxWinVal).trim() !== "") ? String(maxWinVal).trim() : undefined,
-        volatility: (g.volatility != null && String(g.volatility).trim() !== "") ? String(g.volatility).trim() : undefined,
-        releaseDate: (g.release_date != null && String(g.release_date).trim() !== "") ? String(g.release_date).trim() : undefined,
-      };
-    });
-
-    // Combine results: Prioritize Slot Streamers, then add SlotsLaunch results
-    // Put Slot Streamers items first, then add SlotsLaunch items that don't already exist
-    const combined = [...ssItems];
-    const seen = new Map<string, any>();
-    
-    // Add Slot Streamers items first (these take priority)
-    ssItems.forEach((it) => {
-      const key = (it.slug || it.title || "").toLowerCase() + "|" + (it.provider || "").toLowerCase();
-      seen.set(key, it);
-      
-      // Log Oracle of Gold data from Slot Streamers
-      if (it.title && it.title.toLowerCase().includes("oracle of gold")) {
-        console.log("✅ Oracle of Gold from Slot Streamers:", {
-          title: it.title,
-          maxWin: it.maxWin,
-          volatility: it.volatility,
-          releaseDate: it.releaseDate,
-          provider: it.provider
-        });
-      }
-    });
-    
-    // Add SlotsLaunch items only if they don't already exist (from Slot Streamers)
-    mappedSL.forEach((it) => {
-      const key = (it.slug || it.title || "").toLowerCase() + "|" + (it.provider || "").toLowerCase();
-      if (!seen.has(key)) {
-        seen.set(key, it);
-        combined.push(it);
-      } else {
-        // Merge: prefer Slot Streamers data, but fill in missing fields from SlotsLaunch
-        const existing = seen.get(key);
-        
-        // Log if we're trying to merge Oracle of Gold
-        if (it.title && it.title.toLowerCase().includes("oracle of gold")) {
-          console.log("⚠️ Oracle of Gold duplicate detected - merging SlotsLaunch into Slot Streamers:", {
-            existingMaxWin: existing.maxWin,
-            existingVolatility: existing.volatility,
-            slotsLaunchMaxWin: it.maxWin,
-            slotsLaunchVolatility: it.volatility,
-            willKeepMaxWin: existing.maxWin || it.maxWin,
-            willKeepVolatility: existing.volatility || it.volatility
-          });
-        }
-        
-        if (!existing.maxWin && it.maxWin) existing.maxWin = it.maxWin;
-        if (!existing.volatility && it.volatility) existing.volatility = it.volatility;
-        if (!existing.releaseDate && it.releaseDate) existing.releaseDate = it.releaseDate;
-        if (!existing.provider && it.provider) existing.provider = it.provider;
-        if (!existing.thumbnail && it.thumbnail) existing.thumbnail = it.thumbnail;
-      }
-    });
-    
-    const deduped = Array.from(seen.values());
-
-    // Filter results to only include games where the title contains the search query
-    // The API may match on provider/description, but we only want games with the query in the title
-    // Use lenient normalization to handle special characters and spacing differences
-    // Includes "&" and "and" normalization to match "Donny & Danny" with "Donny and Danny"
-    const normalize = (str: string) => {
-      return (str || '')
-        .toLowerCase()
-        .trim()
-        .replace(/&/g, " and ") // Replace & with " and "
-        .replace(/\band\b/g, " and ") // Normalize "and" to ensure consistent spacing
-        .replace(/[-–—]/g, " ")  // Replace dashes with spaces
-        .replace(/\s+/g, " ")      // Normalize multiple spaces to single space
-        .trim();
-    };
-    
-    const normalizedQuery = normalize(q);
+    const mappedSL: GameSearchResult[] = slGames;
+    const deduped = mergeGameSearchResults(ssItems, mappedSL);
+    const normalizedQuery = normalizeGameTitle(q);
     
     // Debug: Log all titles in deduped array before filtering (for "Mental" search)
     if (normalizedQuery === "mental") {
@@ -393,14 +328,14 @@ export async function GET(request: Request) {
         title: item.title,
         slug: item.slug,
         provider: item.provider,
-        normalized: normalize(item.title || "")
+        normalized: normalizeGameTitle(item.title || "")
       }));
       console.log(`🔍 All titles in deduped array (before filtering) for "Mental" search:`, allTitles);
       console.log(`🔍 Total items in deduped: ${deduped.length}`);
     }
     const filtered = deduped.filter((item) => {
       if (!item.title) return false;
-      const normalizedTitle = normalize(item.title);
+      const normalizedTitle = normalizeGameTitle(item.title);
       // Check if the title contains the search query (case-insensitive, lenient normalization)
       // This will match "Mental 2" when searching for "Mental" because "mental 2" includes "mental"
       // It will also match "Mental" exactly when searching for "Mental"
@@ -426,8 +361,8 @@ export async function GET(request: Request) {
     
     // Debug: Check specifically for "Mental" when searching for "Mental"
     if (normalizedQuery === "mental") {
-      const exactMental = deduped.find((item: any) => normalize(item.title || "") === "mental");
-      const mental2 = deduped.find((item: any) => normalize(item.title || "") === "mental 2");
+      const exactMental = deduped.find((item) => normalizeGameTitle(item.title || "") === "mental");
+      const mental2 = deduped.find((item) => normalizeGameTitle(item.title || "") === "mental 2");
       console.log(`🔍 Searching for "Mental" - Found in API results:`, {
         exactMental: exactMental ? exactMental.title : "NOT FOUND",
         mental2: mental2 ? mental2.title : "NOT FOUND",
@@ -439,8 +374,8 @@ export async function GET(request: Request) {
     if (deduped.length > 0) {
       const sampleTitles = deduped.slice(0, 10).map((item: any) => ({
         title: item.title,
-        normalized: normalize(item.title || ""),
-        matches: normalize(item.title || "").includes(normalizedQuery)
+        normalized: normalizeGameTitle(item.title || ""),
+        matches: normalizeGameTitle(item.title || "").includes(normalizedQuery)
       })).filter((item: any) => item.title);
       console.log(`🔍 Filtering ${deduped.length} results for query "${q}" (normalized: "${normalizedQuery}")`);
       console.log(`📋 Sample titles and match status:`, sampleTitles);
@@ -454,8 +389,8 @@ export async function GET(request: Request) {
       // Show normalized versions of sample titles for debugging
       const sampleNormalized = sampleTitles.slice(0, 5).map((title: string) => ({
         original: title,
-        normalized: normalize(title),
-        containsQuery: normalize(title).includes(normalizedQuery)
+        normalized: normalizeGameTitle(title),
+        containsQuery: normalizeGameTitle(title).includes(normalizedQuery)
       }));
       console.log(`🔍 Sample normalized titles:`, sampleNormalized);
     }
@@ -470,7 +405,8 @@ export async function GET(request: Request) {
     const pagination = slJson?.total_pages
       ? { total: slJson.total, total_pages: slJson.total_pages, page: Number(page || 1), limit }
       : undefined;
-    const payload = exhaustive ? filtered : filtered.slice(0, limit);
+    const ranked = rankGameSearchResults(filtered, q);
+    const payload = exhaustive ? ranked : ranked.slice(0, limit);
     
     // Include rate limit warnings in response if applicable
     const warnings: string[] = [];
@@ -479,7 +415,14 @@ export async function GET(request: Request) {
     
     // Include metadata about which APIs were used
     const metadata: any = {
-      primarySource: ssItems.length > 0 ? "slot-streamers" : (slGames.length > 0 ? "slotslaunch" : "none"),
+      primarySource: hasExactInReviews
+        ? "game_reviews"
+        : ssItems.length > 0
+          ? "game_reviews"
+          : slGames.length > 0
+            ? "slotslaunch"
+            : "none",
+      hasExactInReviews,
       usedFallback: usedSlotsLaunch,
       slotStreamersResults: ssItems.length,
       slotsLaunchResults: slGames.length,

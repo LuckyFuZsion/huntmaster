@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { login } from "../actions/auth"
 import { FaDiscord } from "react-icons/fa"
 import { InactiveUserModal } from "@/components/inactive-user-modal"
-import { decrypt } from "@/lib/protection"
+import { decryptSession } from "@/lib/session-crypto"
 
 export function LoginForm() {
   const [error, setError] = useState("")
@@ -28,7 +28,7 @@ export function LoginForm() {
     if (session) {
       try {
         // Check if user is inactive in session
-        const sessionData = JSON.parse(decrypt(session))
+        const sessionData = JSON.parse(decryptSession(session))
         if (sessionData.isActive === false) {
           setShowInactiveModal(true)
           return

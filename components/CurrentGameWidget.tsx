@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useSupabaseCurrentGame } from "@/lib/hooks/useSupabaseCurrentGame";
 import { useSupabaseUserWinsByGame } from "@/lib/hooks/useSupabaseUserWins";
+import { pickExactGameMatch } from "@/lib/game-search-utils";
 
 interface CurrentGameWidgetProps {
   title?: string; // current game title (from stream or tracker)
@@ -151,12 +152,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
             firstFewResults: data.data.slice(0, 3).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) }))
           });
           
-          // Only use game data if there's an exact title match (case-insensitive, normalized)
-          let exactMatch = data.data.find((it: any) => {
-            if (!it.title) return false;
-            const normalizedGameTitle = normalizeTitle(it.title);
-            return normalizedGameTitle === normalizedTitle;
-          });
+          let exactMatch = pickExactGameMatch(data.data, effectiveTitle);
           
           if (exactMatch) {
             console.log('[CurrentGameWidget] ✓ Found exact match in initial search:', exactMatch.title);
@@ -183,15 +179,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
                   console.log('[CurrentGameWidget] Fallback search returned', fallbackData.data.length, 'results');
                   console.log('[CurrentGameWidget] First few fallback results:', fallbackData.data.slice(0, 5).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) })));
                   
-                  exactMatch = fallbackData.data.find((it: any) => {
-                    if (!it.title) return false;
-                    const normalizedGameTitle = normalizeTitle(it.title);
-                    const matches = normalizedGameTitle === normalizedTitle;
-                    if (matches) {
-                      console.log('[CurrentGameWidget] ✓ Match found in fallback:', it.title, 'normalized:', normalizedGameTitle);
-                    }
-                    return matches;
-                  });
+                  exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle);
                   
                   if (exactMatch) {
                     console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);
@@ -268,11 +256,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
                 };
                 
                 const normalizedTitle = normalizeTitle(effectiveTitle);
-                const exactMatch = fallbackData.data.find((it: any) => {
-                  if (!it.title) return false;
-                  const normalizedGameTitle = normalizeTitle(it.title);
-                  return normalizedGameTitle === normalizedTitle;
-                });
+                const exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle);
                 
                 if (exactMatch) {
                   console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useSupabaseUserWinsByGame } from "@/lib/hooks/useSupabaseUserWins";
+import { pickExactGameMatch } from "@/lib/game-search-utils";
 
 interface SimplifiedGame {
   id: number;
@@ -107,12 +108,8 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
           };
           
           const normalizedTitle = normalizeTitle(title);
-          // Only use game data if there's an exact title match (case-insensitive, normalized)
-          let exactMatch = data.data.find((it: any) => {
-            if (!it.title) return false;
-            const normalizedGameTitle = normalizeTitle(it.title);
-            return normalizedGameTitle === normalizedTitle;
-          });
+          // Prefer game_reviews over slotslaunch when both share the same title
+          let exactMatch = pickExactGameMatch(data.data, title);
           
           // If not found, try searching again without the dash (fallback search)
           if (!exactMatch) {
@@ -130,11 +127,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
                 const fallbackData = await fallbackRes.json();
                 
                 if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
-                  exactMatch = fallbackData.data.find((it: any) => {
-                    if (!it.title) return false;
-                    const normalizedGameTitle = normalizeTitle(it.title);
-                    return normalizedGameTitle === normalizedTitle;
-                  });
+                  exactMatch = pickExactGameMatch(fallbackData.data, title);
                   if (exactMatch) {
                     console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);
                   }
@@ -205,11 +198,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
                 };
                 
                 const normalizedTitle = normalizeTitle(title);
-                const exactMatch = fallbackData.data.find((it: any) => {
-                  if (!it.title) return false;
-                  const normalizedGameTitle = normalizeTitle(it.title);
-                  return normalizedGameTitle === normalizedTitle;
-                });
+                const exactMatch = pickExactGameMatch(fallbackData.data, title);
                 
                 if (exactMatch) {
                   console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);
