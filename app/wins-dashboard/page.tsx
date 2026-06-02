@@ -81,7 +81,6 @@ export default function WinsDashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUsername, setCurrentUsername] = useState<string | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
   const [initialized, setInitialized] = useState(false)
 
