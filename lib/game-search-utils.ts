@@ -12,6 +12,7 @@ export interface GameSearchResult {
   source: GameSearchSource
 }
 
+/** `game_reviews` uses `developer` for studio name (no `provider` column in DB). */
 export const GAME_REVIEWS_SELECT =
   "id, slug, title, developer, thumbnail_url, banner_url, max_win, volatility, release_date, features"
 
@@ -23,11 +24,79 @@ export function normalizeGameTitle(str: string): string {
   return (str || "")
     .toLowerCase()
     .trim()
+    .replace(/[™®©]/g, "")
     .replace(/&/g, " and ")
     .replace(/\band\b/g, " and ")
     .replace(/[-–—]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+export function gameReviewProvider(row: Record<string, unknown>): string | undefined {
+  const dev = row.developer ? String(row.developer).trim() : ""
+  const prov = row.provider ? String(row.provider).trim() : ""
+  return dev || prov || undefined
+}
+
+const INVALID_PROVIDER_TOKENS = new Set([
+  "",
+  "-",
+  "—",
+  "n/a",
+  "na",
+  "unknown",
+  "null",
+  "undefined",
+  "none",
+  "not detected",
+  "detecting...",
+  "detecting",
+]);
+
+/**
+ * Provider is optional — many casinos only expose the game name.
+ * Returns undefined when missing or not a real studio label.
+ */
+export function sanitizeProviderFilter(provider?: string | null): string | undefined {
+  if (provider == null) return undefined;
+  const trimmed = provider.trim();
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  if (INVALID_PROVIDER_TOKENS.has(lower)) return undefined;
+  if (lower.length < 2) return undefined;
+  return trimmed;
+}
+
+/** Loose provider match (Pragmatic ↔ Pragmatic Play). Only used when a provider hint exists. */
+export function providerMatches(
+  itemProvider: string | undefined,
+  filter: string | undefined,
+): boolean {
+  if (!filter?.trim()) return true
+  if (!itemProvider?.trim()) return true
+  const a = normalizeGameTitle(itemProvider)
+  const b = normalizeGameTitle(filter)
+  return a.includes(b) || b.includes(a)
+}
+
+export function filterExactTitleMatches<T extends { title?: string }>(
+  items: T[],
+  query: string,
+): T[] {
+  const normalizedQuery = normalizeGameTitle(query)
+  return items.filter(
+    (item) => item.title && normalizeGameTitle(item.title) === normalizedQuery,
+  )
+}
+
+export function preferProviderMatch<T extends { provider?: string }>(
+  items: T[],
+  providerFilter: string | undefined,
+): T[] {
+  const filter = sanitizeProviderFilter(providerFilter);
+  if (!filter || items.length <= 1) return items;
+  const matched = items.filter((item) => providerMatches(item.provider, filter));
+  return matched.length > 0 ? matched : items;
 }
 
 export function dedupeKeyByTitle(item: { title?: string }): string {
@@ -46,7 +115,7 @@ export function mapGameReviewRow(g: Record<string, unknown>): GameSearchResult {
     id: g.id as number | string,
     slug: String(g.slug || title.toLowerCase().replace(/\s+/g, "-") || g.id),
     title,
-    provider: g.developer ? String(g.developer) : undefined,
+    provider: gameReviewProvider(g),
     thumbnail: (g.thumbnail_url || g.banner_url || null) as string | null,
     maxWin: maxWinVal != null && String(maxWinVal).trim() !== "" ? String(maxWinVal).trim() : undefined,
     volatility:
@@ -133,16 +202,18 @@ export function hasExactTitleMatch(items: { title?: string }[], query: string): 
   return items.some((item) => item.title && normalizeGameTitle(item.title) === normalizedQuery)
 }
 
-/** Widget helper: exact title match, preferring game_reviews over slotslaunch. */
-export function pickExactGameMatch<T extends { title?: string; source?: string }>(
+/**
+ * Widget helper: match by game title only; provider is an optional tie-breaker.
+ * Always prefers game_reviews over slotslaunch for the same title.
+ */
+export function pickExactGameMatch<T extends { title?: string; source?: string; provider?: string }>(
   items: T[],
   targetTitle: string,
+  providerFilter?: string,
 ): T | undefined {
-  const normalizedTarget = normalizeGameTitle(targetTitle)
-  const matches = items.filter(
-    (item) => item.title && normalizeGameTitle(item.title) === normalizedTarget,
-  )
-  return matches.find((item) => item.source === "game_reviews") ?? matches[0]
+  let matches = filterExactTitleMatches(items, targetTitle);
+  matches = preferProviderMatch(matches, providerFilter);
+  return matches.find((item) => item.source === "game_reviews") ?? matches[0];
 }
 
 export function prependUniqueByTitle(

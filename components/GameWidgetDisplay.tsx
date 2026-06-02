@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useSupabaseUserWinsByGame } from "@/lib/hooks/useSupabaseUserWins";
-import { pickExactGameMatch } from "@/lib/game-search-utils";
+import { pickExactGameMatch, sanitizeProviderFilter } from "@/lib/game-search-utils";
 
 interface SimplifiedGame {
   id: number;
@@ -31,7 +31,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
   const [imageError, setImageError] = useState(false);
   const [showBestWins, setShowBestWins] = useState(true);
 
-  const effectiveProvider = providerProp || undefined;
+  const effectiveProvider = sanitizeProviderFilter(providerProp);
 
   // Cache game data to avoid excessive API calls
   const gameDataCacheRef = useRef<Map<string, any>>(new Map());
@@ -65,9 +65,10 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
       // Check cache first
       const cacheKey = normalizeTitle(title);
       const cached = gameDataCacheRef.current.get(cacheKey);
-      if (cached) {
+      if (cached && cached.source !== "slotslaunch") {
         console.log('GameWidgetDisplay: Using cached game data', {
           title: cached.title,
+          source: cached.source,
           maxWin: cached.maxWin,
           volatility: cached.volatility,
           releaseDate: cached.releaseDate,
@@ -109,7 +110,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
           
           const normalizedTitle = normalizeTitle(title);
           // Prefer game_reviews over slotslaunch when both share the same title
-          let exactMatch = pickExactGameMatch(data.data, title);
+          let exactMatch = pickExactGameMatch(data.data, title, effectiveProvider);
           
           // If not found, try searching again without the dash (fallback search)
           if (!exactMatch) {
@@ -127,7 +128,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
                 const fallbackData = await fallbackRes.json();
                 
                 if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
-                  exactMatch = pickExactGameMatch(fallbackData.data, title);
+                  exactMatch = pickExactGameMatch(fallbackData.data, title, effectiveProvider);
                   if (exactMatch) {
                     console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);
                   }
@@ -146,7 +147,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
               volatility: exactMatch.volatility,
               releaseDate: exactMatch.releaseDate,
               provider: exactMatch.provider,
-              source: data.metadata?.primarySource || 'unknown'
+              source: exactMatch.source || data.metadata?.primarySource || 'unknown',
             });
             setGame(exactMatch);
             setImageError(false);
@@ -198,7 +199,7 @@ export function GameWidgetDisplay({ title, provider: providerProp, username, siz
                 };
                 
                 const normalizedTitle = normalizeTitle(title);
-                const exactMatch = pickExactGameMatch(fallbackData.data, title);
+                const exactMatch = pickExactGameMatch(fallbackData.data, title, effectiveProvider);
                 
                 if (exactMatch) {
                   console.log('[GameWidgetDisplay] ✓ Found match in fallback search:', exactMatch.title);

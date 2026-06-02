@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useSupabaseCurrentGame } from "@/lib/hooks/useSupabaseCurrentGame";
 import { useSupabaseUserWinsByGame } from "@/lib/hooks/useSupabaseUserWins";
-import { pickExactGameMatch } from "@/lib/game-search-utils";
+import { pickExactGameMatch, sanitizeProviderFilter } from "@/lib/game-search-utils";
 
 interface CurrentGameWidgetProps {
   title?: string; // current game title (from stream or tracker)
@@ -61,7 +61,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
   }, [currentGame, username, titleProp]);
 
   const effectiveTitle = titleProp || autoTitle || "";
-  const effectiveProvider = providerProp || autoProvider || undefined;
+  const effectiveProvider = sanitizeProviderFilter(providerProp || autoProvider);
 
   const suggestUrl = useMemo(() => {
     if (!effectiveTitle) return null;
@@ -93,9 +93,10 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
       // Check cache first
       const cacheKey = normalizeTitle(effectiveTitle);
       const cached = gameDataCacheRef.current.get(cacheKey);
-      if (cached) {
+      if (cached && cached.source !== "slotslaunch") {
         console.log('CurrentGameWidget: Using cached game data', {
           title: cached.title,
+          source: cached.source,
           maxWin: cached.maxWin,
           volatility: cached.volatility,
           releaseDate: cached.releaseDate,
@@ -152,7 +153,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
             firstFewResults: data.data.slice(0, 3).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) }))
           });
           
-          let exactMatch = pickExactGameMatch(data.data, effectiveTitle);
+          let exactMatch = pickExactGameMatch(data.data, effectiveTitle, effectiveProvider);
           
           if (exactMatch) {
             console.log('[CurrentGameWidget] ✓ Found exact match in initial search:', exactMatch.title);
@@ -179,7 +180,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
                   console.log('[CurrentGameWidget] Fallback search returned', fallbackData.data.length, 'results');
                   console.log('[CurrentGameWidget] First few fallback results:', fallbackData.data.slice(0, 5).map((g: any) => ({ title: g.title, normalized: normalizeTitle(g.title) })));
                   
-                  exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle);
+                  exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle, effectiveProvider);
                   
                   if (exactMatch) {
                     console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);
@@ -256,7 +257,7 @@ export default function CurrentGameWidget({ title: titleProp, provider: provider
                 };
                 
                 const normalizedTitle = normalizeTitle(effectiveTitle);
-                const exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle);
+                const exactMatch = pickExactGameMatch(fallbackData.data, effectiveTitle, effectiveProvider);
                 
                 if (exactMatch) {
                   console.log('[CurrentGameWidget] ✓ Found match in fallback search:', exactMatch.title);

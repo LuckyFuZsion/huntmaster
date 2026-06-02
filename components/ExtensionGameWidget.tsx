@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSupabaseCurrentGame } from "@/lib/hooks/useSupabaseCurrentGame";
 import { GameWidgetDisplay } from "./GameWidgetDisplay";
+import { sanitizeProviderFilter } from "@/lib/game-search-utils";
 
 interface ExtensionGameWidgetProps {
   title?: string; // Override title (highest priority)
@@ -54,7 +55,7 @@ export default function ExtensionGameWidget({ title: titleProp, provider: provid
   }, [currentGame, username, titleProp]);
 
   const effectiveTitle = titleProp || autoTitle || "";
-  const effectiveProvider = providerProp || autoProvider || undefined;
+  const effectiveProvider = sanitizeProviderFilter(providerProp || autoProvider);
 
   // Don't render if no title available
   if (!effectiveTitle) return null;

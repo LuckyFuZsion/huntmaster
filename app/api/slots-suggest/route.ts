@@ -3,14 +3,18 @@ import { supabaseAdmin, getSupabaseClient } from "@/lib/supabase-admin";
 import { decrypt } from "@/lib/protection";
 import {
   GAME_REVIEWS_SELECT,
+  pickExactGameMatch,
   SLOTSLAUNCH_SELECT,
+  filterExactTitleMatches,
   hasExactTitleMatch,
   mapGameReviewRow,
   mapSlotsLaunchRow,
   mergeGameSearchResults,
   normalizeGameTitle,
   prependUniqueByTitle,
+  preferProviderMatch,
   rankGameSearchResults,
+  sanitizeProviderFilter,
   type GameSearchResult,
 } from "@/lib/game-search-utils";
 
@@ -61,7 +65,10 @@ export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
     const q = searchParams.get("q") || searchParams.get("title") || "";
-    const providerFilter = searchParams.get("provider") || searchParams.get("developer") || undefined;
+    // Provider is optional — title-only casino detection is the common case
+    const providerFilter = sanitizeProviderFilter(
+      searchParams.get("provider") || searchParams.get("developer"),
+    );
     const limit = Number(searchParams.get("limit") || 10);
     const page = searchParams.get("page") || undefined;
     const exhaustive = searchParams.get("exhaustive") === "1" || searchParams.get("exhaustive") === "true";
@@ -104,7 +111,7 @@ export async function GET(request: Request) {
 
     // Check cache for all requests (including browser extension)
     // Cached requests don't count toward API usage limits
-    const cacheKey = `slots-suggest:v2:${q.toLowerCase().trim()}:${limit}:${exhaustive ? "1" : "0"}:${page || "1"}:${providerFilter || ""}`
+    const cacheKey = `slots-suggest:v5:${q.toLowerCase().trim()}:${limit}:${exhaustive ? "1" : "0"}:${page || "1"}:${providerFilter || ""}`
     const cached = getCached(cacheKey)
     if (cached) {
       // Apply filtering to cached results to ensure they match the query
@@ -133,21 +140,42 @@ export async function GET(request: Request) {
           console.log(`⚠️ Cache hit but filtering removed all results, fetching fresh data for: "${q}"`);
           // Continue to fetch fresh data below
         } else {
-          // Return filtered cached results
+          const hasReviewInCache = filteredCached.some(
+            (item: GameSearchResult) => item.source === "game_reviews",
+          );
+          // Old cache entries (pre-fix) often only stored slotslaunch with no source tag
+          if (!hasReviewInCache) {
+            console.log(
+              `⚠️ Cache hit has no game_reviews rows for "${q}", refetching (likely stale cache)`,
+            );
+          } else {
+          // Re-rank cached rows so game_reviews wins over stale slotslaunch-only cache entries
+          const rankedCached = rankGameSearchResults(
+            filteredCached as GameSearchResult[],
+            q,
+          );
+          const bestCached = pickExactGameMatch(rankedCached, trimmedQ, providerFilter);
+          const orderedCached = bestCached
+            ? [bestCached, ...rankedCached.filter((item) => item !== bestCached)]
+            : rankedCached;
+          const payloadCached = exhaustive ? orderedCached : orderedCached.slice(0, limit);
           const filteredCachedResponse = {
             ...cached,
-            data: filteredCached,
+            data: payloadCached,
             metadata: {
               ...cached.metadata,
-              filteredResults: filteredCached.length,
+              filteredResults: payloadCached.length,
               totalBeforeFilter: cached.data.length,
-              fromCache: true
-            }
+              fromCache: true,
+              resolvedSource: payloadCached[0]?.source,
+              hasExactInReviews: hasExactTitleMatch(payloadCached, q),
+            },
           };
-          console.log(`✅ Cache hit for slots-suggest: "${q}" (Filtered: ${cached.data.length} → ${filteredCached.length})`)
-          // IMPORTANT: Don't increment API usage for cached results
-          // Cached requests are free and don't count toward limits
-          return NextResponse.json(filteredCachedResponse)
+          console.log(
+            `✅ Cache hit for slots-suggest: "${q}" → resolved ${payloadCached[0]?.source || "none"}`,
+          );
+          return NextResponse.json(filteredCachedResponse);
+          }
         }
       } else {
         // Cached data structure is invalid, fetch fresh
@@ -183,45 +211,69 @@ export async function GET(request: Request) {
     let ssItems: GameSearchResult[] = [];
     let ssRateLimited = false; // No rate limiting for database queries
     
+    let hasExactInReviews = false;
+
     try {
       const supabase = getSupabaseClient();
-      const exactReviewRows: Record<string, unknown>[] = [];
 
-      // 1) Exact title match first — avoids broad %query% + limit pushing the real game out
-      const exactTitleQuery = supabase
-        .from("game_reviews")
-        .select(GAME_REVIEWS_SELECT)
-        .ilike("title", trimmedQ);
-
-      const { data: exactReviews, error: exactError } = providerFilter
-        ? await exactTitleQuery.ilike("developer", `%${providerFilter}%`).limit(5)
-        : await exactTitleQuery.limit(5);
-
-      if (exactError) {
-        console.error("Error querying exact game_reviews match:", exactError);
-      } else if (exactReviews?.length) {
-        exactReviewRows.push(...exactReviews);
-      }
-
-      // 2) Broad substring search for autocomplete / suggestions
       const { data: gameReviews, error: ssError } = await supabase
         .from("game_reviews")
         .select(GAME_REVIEWS_SELECT)
         .or(`title.ilike.%${q}%,title.ilike.%${normalizedQ}%`)
-        .limit(Math.max(limit, 20));
+        .limit(Math.max(limit, 50));
+
+      // Title-only search; studio name is read from `developer` column
 
       if (ssError) {
         console.error(`Error querying game_reviews table:`, ssError);
       } else {
         const broadMapped = (gameReviews || []).map((g) => mapGameReviewRow(g as Record<string, unknown>));
-        const exactMapped = exactReviewRows.map((g) => mapGameReviewRow(g));
+        let exactMapped = filterExactTitleMatches(broadMapped, trimmedQ);
+        exactMapped = preferProviderMatch(exactMapped, providerFilter);
+        hasExactInReviews = exactMapped.length > 0;
         ssItems = prependUniqueByTitle(exactMapped, broadMapped);
 
         console.log(
-          `✅ game_reviews: ${exactMapped.length} exact + ${broadMapped.length} broad → ${ssItems.length} unique for "${q}"`,
+          `✅ game_reviews: ${exactMapped.length} exact + ${broadMapped.length} broad → ${ssItems.length} unique for "${q}" (hasExact=${hasExactInReviews})`,
         );
-        if (ssItems.length > 0) {
-          console.log(`📋 Sample titles from game_reviews:`, ssItems.slice(0, 5).map((item) => item.title));
+        if (exactMapped.length > 0) {
+          console.log(`📋 Exact game_reviews match:`, exactMapped.map((item) => ({
+            title: item.title,
+            provider: item.provider,
+            source: item.source,
+          })));
+        } else {
+          // Slug fallback when title text differs slightly (™, spacing, etc.)
+          const slugGuess = trimmedQ
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "");
+          if (slugGuess.length >= 3) {
+            const { data: bySlug, error: slugError } = await supabase
+              .from("game_reviews")
+              .select(GAME_REVIEWS_SELECT)
+              .or(`slug.eq.${slugGuess},slug.ilike.%${slugGuess}%`)
+              .limit(5);
+            if (slugError) {
+              console.error("Error querying game_reviews by slug:", slugError);
+            } else if (bySlug?.length) {
+              const slugMapped = (bySlug as Record<string, unknown>[]).map((g) =>
+                mapGameReviewRow(g),
+              );
+              let slugExact = filterExactTitleMatches(slugMapped, trimmedQ);
+              if (slugExact.length === 0) {
+                slugExact = preferProviderMatch(slugMapped, providerFilter);
+              }
+              if (slugExact.length > 0) {
+                hasExactInReviews = true;
+                ssItems = prependUniqueByTitle(slugExact, ssItems);
+                console.log(`📋 game_reviews slug fallback match for "${q}":`, slugExact[0].title);
+              }
+            }
+          }
+          if (ssItems.length > 0 && !hasExactInReviews) {
+            console.log(`📋 Sample titles from game_reviews:`, ssItems.slice(0, 5).map((item) => item.title));
+          }
         }
       }
     } catch (e) {
@@ -248,7 +300,6 @@ export async function GET(request: Request) {
     const MIN_RESULTS_THRESHOLD = 5; // If Slot Streamers has < 5 results, also check SlotsLaunch
     
     const normalizedQueryForFilter = normalizeGameTitle(q);
-    const hasExactInReviews = hasExactTitleMatch(ssItems, q);
     const ssFilteredCount = ssItems.filter((item) => {
       if (!item.title) return false;
       return normalizeGameTitle(item.title).includes(normalizedQueryForFilter);
@@ -276,36 +327,19 @@ export async function GET(request: Request) {
       
       try {
         const supabase = getSupabaseClient();
-        const slExactRows: Record<string, unknown>[] = [];
-
-        const exactNameQuery = supabase
-          .from("slotslaunch_games")
-          .select(SLOTSLAUNCH_SELECT)
-          .ilike("name", trimmedQ);
-
-        const { data: exactSlGames, error: exactSlError } = providerFilter
-          ? await exactNameQuery
-              .or(`provider.ilike.%${providerFilter}%,provider_slug.ilike.%${providerFilter}%`)
-              .limit(5)
-          : await exactNameQuery.limit(5);
-
-        if (exactSlError) {
-          console.error("Error querying exact slotslaunch_games match:", exactSlError);
-        } else if (exactSlGames?.length) {
-          slExactRows.push(...exactSlGames);
-        }
 
         const { data: slotsLaunchGames, error: slError } = await supabase
           .from("slotslaunch_games")
           .select(SLOTSLAUNCH_SELECT)
           .or(`name.ilike.%${q}%,name.ilike.%${normalizedQ}%`)
-          .limit(Math.max(limit, 20));
+          .limit(Math.max(limit, 50));
 
         if (slError) {
           console.error(`Error querying slotslaunch_games table:`, slError);
         } else {
           const broadSl = (slotsLaunchGames || []).map((g) => mapSlotsLaunchRow(g as Record<string, unknown>));
-          const exactSl = slExactRows.map((g) => mapSlotsLaunchRow(g));
+          let exactSl = filterExactTitleMatches(broadSl, trimmedQ);
+          exactSl = preferProviderMatch(exactSl, providerFilter);
           slGames = prependUniqueByTitle(exactSl, broadSl);
           console.log(
             `✅ slotslaunch_games: ${exactSl.length} exact + ${broadSl.length} broad → ${slGames.length} unique (game_reviews had ${ssItems.length})`,
@@ -407,6 +441,7 @@ export async function GET(request: Request) {
       : undefined;
     const ranked = rankGameSearchResults(filtered, q);
     const payload = exhaustive ? ranked : ranked.slice(0, limit);
+    const resolvedSource = payload[0]?.source;
     
     // Include rate limit warnings in response if applicable
     const warnings: string[] = [];
@@ -423,6 +458,8 @@ export async function GET(request: Request) {
             ? "slotslaunch"
             : "none",
       hasExactInReviews,
+      resolvedSource,
+      searchMode: providerFilter ? "title+provider" : "title-only",
       usedFallback: usedSlotsLaunch,
       slotStreamersResults: ssItems.length,
       slotsLaunchResults: slGames.length,
