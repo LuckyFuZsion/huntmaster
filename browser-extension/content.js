@@ -13,7 +13,8 @@
     hostname.includes('videoslots') || url.includes('videoslots.com/play') ||
     hostname.includes('vave') || url.includes('vave.com/casino/game') || url.includes('vave.com/live-casino/game') ||
     hostname.includes('gamba') || url.includes('gamba') ||
-    hostname.includes('cryptocasino') || url.includes('cryptocasino');
+    hostname.includes('cryptocasino') || url.includes('cryptocasino') ||
+    hostname.includes('casinodupuerto') || url.includes('casinodupuerto.com/casino/game');
   
   if (!isWhitelisted) {
     return; // Not a whitelisted casino, exit early
@@ -229,6 +230,19 @@
     return { title, provider };
   }
 
+  // Parse Casino Du Puerto URLs: https://casinodupuerto.com/casino/game/{game-slug}
+  function parseCasinoDuPuertoFromUrl(url) {
+    if (!url) return null;
+    const match = url.toLowerCase().match(/casinodupuerto\.com\/casino\/game\/([^/?#]+)/);
+    if (!match || !match[1]) return null;
+
+    const gameSlug = match[1];
+    const title = slugToTitle(gameSlug);
+
+    if (!title) return null;
+    return { title, provider: null };
+  }
+
   // Casino-specific detection logic
   function detectCasino() {
     const hostname = window.location.hostname.toLowerCase();
@@ -248,6 +262,9 @@
     }
     if (hostname.includes('cryptocasino') || url.includes('cryptocasino')) {
       return 'cryptocasino';
+    }
+    if (hostname.includes('casinodupuerto') || url.includes('casinodupuerto.com/casino/game')) {
+      return 'casinodupuerto';
     }
     // Add more casinos here as needed
     
@@ -604,6 +621,16 @@
         gameInfo.source = 'vave-url';
       }
       // Title will be set from page title/metadata below if available
+    }
+
+    // For Casino Du Puerto, parse game name directly from URL slug
+    if (casino === 'casinodupuerto') {
+      const duPuertoInfo = parseCasinoDuPuertoFromUrl(window.location.href);
+      if (duPuertoInfo && duPuertoInfo.title && isValidGameTitle(duPuertoInfo.title)) {
+        gameInfo.title = duPuertoInfo.title;
+        gameInfo.provider = duPuertoInfo.provider || null;
+        gameInfo.source = 'casinodupuerto-url';
+      }
     }
     
     // Try title-based detection first

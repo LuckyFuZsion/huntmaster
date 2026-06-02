@@ -97,24 +97,27 @@ async function copyWidgetUrl() {
   }
 }
 
-// Load saved configuration
-async function loadConfig() {
+// Read saved configuration from storage (does not modify the UI)
+async function getConfig() {
   const result = await chrome.storage.local.get([API_BASE_URL_KEY, SESSION_TOKEN_KEY]);
-  const apiBaseUrl = result[API_BASE_URL_KEY] || 'https://huntmaster.vercel.app';
-  const sessionToken = result[SESSION_TOKEN_KEY] || '';
-  
+  return {
+    apiBaseUrl: result[API_BASE_URL_KEY] || 'https://huntmaster.vercel.app',
+    sessionToken: result[SESSION_TOKEN_KEY] || ''
+  };
+}
+
+// Apply stored configuration to form fields (initial load, after save, after logout)
+async function applyStoredConfigToUI() {
+  const { apiBaseUrl, sessionToken } = await getConfig();
   document.getElementById('api-base-url').value = apiBaseUrl;
   document.getElementById('session-token').value = sessionToken;
-  
-  // Update user info display
   updateUserInfo(sessionToken);
-  
-  // Update logout button visibility (will be called again in DOMContentLoaded, but safe to call here)
-  if (typeof updateLogoutButton === 'function') {
-    updateLogoutButton();
-  }
-  
-  return { apiBaseUrl, sessionToken };
+  await updateLogoutButton();
+}
+
+// Load saved configuration (read-only — safe to call during API requests)
+async function loadConfig() {
+  return getConfig();
 }
 
 // Save configuration
@@ -129,7 +132,7 @@ async function saveConfig() {
   
   // Update user info display after saving
   updateUserInfo(sessionToken);
-  updateLogoutButton();
+  await updateLogoutButton();
   
   const username = getUsernameFromSession(sessionToken);
   if (username) {
@@ -528,33 +531,32 @@ async function handleLogout() {
   document.getElementById('session-token').value = '';
   updateUserInfo('');
   showStatus('Logged out successfully', 'success');
-  updateLogoutButton();
+  await updateLogoutButton();
 }
 
-// Update logout button visibility and hide/show auth fields
-function updateLogoutButton() {
+// Update logout button visibility and hide/show auth fields (based on saved token in storage)
+async function updateLogoutButton() {
+  const { sessionToken } = await getConfig();
   const logoutBtn = document.getElementById('logout-btn');
-  const sessionToken = document.getElementById('session-token').value;
   const manualAuthSection = document.getElementById('manual-auth-section');
   const discordLoginBtn = document.getElementById('discord-login-btn');
+  const authOrDivider = document.getElementById('auth-or-divider');
+  const isLoggedIn = !!sessionToken;
   
   if (logoutBtn) {
-    logoutBtn.style.display = sessionToken ? 'block' : 'none';
+    logoutBtn.style.display = isLoggedIn ? 'block' : 'none';
   }
   
-  // Hide manual auth section (session token, save config) when logged in
-  // Show Discord login button only when not logged in
-  if (manualAuthSection && discordLoginBtn) {
-    if (sessionToken) {
-      // Logged in - hide manual auth section and Discord login button
-      manualAuthSection.style.display = 'none';
-      discordLoginBtn.style.display = 'none';
-    } else {
-      // Not logged in - show Discord login button, hide manual auth section by default
-      // (User can manually show it if needed, but we'll keep it hidden for cleaner UI)
-      discordLoginBtn.style.display = 'block';
-      manualAuthSection.style.display = 'none';
-    }
+  if (discordLoginBtn) {
+    discordLoginBtn.style.display = isLoggedIn ? 'none' : 'block';
+  }
+  
+  if (authOrDivider) {
+    authOrDivider.style.display = isLoggedIn ? 'none' : 'block';
+  }
+  
+  if (manualAuthSection) {
+    manualAuthSection.style.display = isLoggedIn ? 'none' : 'block';
   }
 }
 
@@ -1950,7 +1952,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   stakeInput.value = '';
   winInput.value = '';
   
-  await loadConfig();
+  await applyStoredConfigToUI();
   
   // Try to restore extension state first
   const stateRestored = await restoreExtensionState();
@@ -1973,7 +1975,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // After game detection, automatically update widget if user is logged in and game is valid
     setTimeout(async () => {
-      const sessionToken = document.getElementById('session-token').value;
+      const { sessionToken } = await getConfig();
       if (sessionToken) {
         const gameTitle = document.getElementById('detected-game')?.textContent?.trim();
         const provider = document.getElementById('detected-provider')?.textContent?.trim();
@@ -2068,12 +2070,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     copyWidgetUrlBtn.addEventListener('click', copyWidgetUrl);
   }
   
-  // Update logout button visibility on load
-  updateLogoutButton();
+  // Update logout button visibility on load (also done in applyStoredConfigToUI)
   
-  // Update logout button when session token changes
-  document.getElementById('session-token').addEventListener('input', () => {
-    updateLogoutButton();
+  // Preview username while typing token (before save) — do not hide the save form
+  document.getElementById('session-token').addEventListener('input', (e) => {
+    updateUserInfo(e.target.value.trim());
   });
 
   // Game detection is event-driven via chrome.runtime.onMessage listener
@@ -2145,13 +2146,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Lock/unlock tab button
   document.getElementById('lock-tab-btn').addEventListener('click', toggleTabLock);
-
-  // Update user info when session token field changes
-  document.getElementById('session-token').addEventListener('input', (e) => {
-    const sessionToken = e.target.value.trim();
-    updateUserInfo(sessionToken);
-    updateLogoutButton();
-  });
 
   // Check lock status on load
   updateLockStatus();
