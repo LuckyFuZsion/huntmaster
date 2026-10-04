@@ -234,9 +234,6 @@ export default function AdminDashboard() {
           <CardTitle className="text-xl sm:text-2xl">Manage Users</CardTitle>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <Button onClick={() => setIsAddDialogOpen(true)} className="w-full sm:w-auto">Add New User</Button>
-            <Button variant="outline" onClick={() => router.push("/admin/test-new-admin")} className="w-full sm:w-auto">
-              Test New Admin
-            </Button>
             <Button variant="outline" onClick={() => router.push("/dashboard")} className="w-full sm:w-auto">
               Back to Dashboard
             </Button>

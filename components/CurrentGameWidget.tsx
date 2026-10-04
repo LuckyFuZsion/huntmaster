@@ -24,6 +24,7 @@ interface SimplifiedGame {
 }
 
 export default function CurrentGameWidget({ title: titleProp, provider: providerProp, username, size = 160 }: CurrentGameWidgetProps) {
+  const gameDataCacheRef = useRef(new Map<string, any>());
   const [autoTitle, setAutoTitle] = useState<string | null>(null);
   const [autoProvider, setAutoProvider] = useState<string | null>(null);
   const [game, setGame] = useState<SimplifiedGame | null>(null);

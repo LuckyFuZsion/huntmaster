@@ -28,3 +28,10 @@ next-env.d.ts
 .env*.local
 
 # Firebase service account key.firebase-service-account.json
+
+# extension build artifacts (keep on disk, not in git)
+browser-extension/*.zip
+browser-extension/HuntMaster-Extension-v*/
+browser-extension/v*-extracted/
+browser-extension/huntmaster-extension/
+browser-extension/huntmaster-extension-new/

@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { encrypt } from "@/lib/protection"
+import { signSession } from "@/lib/session"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { firestoreAdmin } from "@/lib/firestore-admin" // Fallback only
 
@@ -260,7 +260,7 @@ export async function GET(request: NextRequest) {
         timestamp: Date.now(),
       }
 
-      const encryptedSession = encrypt(JSON.stringify(session))
+      const encryptedSession = signSession(session)
 
       // Return HTML with modal instead of redirecting to dashboard
       const html = `
@@ -313,7 +313,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Encrypt the session
-    const encryptedSession = encrypt(JSON.stringify(session))
+    const encryptedSession = signSession(session)
 
     // If this is from the browser extension, return session via postMessage
     if (isExtension) {

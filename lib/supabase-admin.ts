@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 // Server-side Supabase client with service role key (if available) or anon key
 function getSupabaseConfig() {
@@ -18,7 +18,7 @@ function getSupabaseConfig() {
   return { supabaseUrl, supabaseKey }
 }
 
-let supabaseClient: ReturnType<typeof createClient> | null = null
+let supabaseClient: SupabaseClient<any, 'public', any> | null = null
 
 function getSupabaseAdminClient() {
   if (!supabaseClient) {

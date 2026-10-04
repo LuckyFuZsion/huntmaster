@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin, User, UserApiUsageRecord } from "@/lib/supabase-admin"
-import { decrypt } from "@/lib/protection"
+import { requireSession } from "@/lib/session"
 
 type UsageStatus = "healthy" | "warning" | "exhausted" | "unlimited" | "inactive"
 
@@ -64,7 +64,7 @@ function requireAdminSession(request: Request) {
   }
 
   try {
-    const sessionData = JSON.parse(decrypt(token))
+    const sessionData = requireSession(token)
     if (!sessionData?.isAdmin) {
       throw new HttpError(403, "Admin privileges required")
     }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { decrypt } from "@/lib/protection"
+import { requireSession } from "@/lib/session"
 
 export async function DELETE(
   request: Request,
@@ -32,7 +32,7 @@ export async function DELETE(
     // Decrypt session to get user info
     let sessionData: any
     try {
-      sessionData = JSON.parse(decrypt(session))
+      sessionData = requireSession(session)
     } catch (error) {
       return NextResponse.json(
         { success: false, error: "Invalid session token" },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin, getSupabaseClient } from "@/lib/supabase-admin"
-import { decrypt } from "@/lib/protection"
+import { requireSession } from "@/lib/session"
 
 // Lightweight endpoint to check if a game exists in Supabase database
 // Checks: user slots, all slots, game_reviews, and slotslaunch_games tables
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     // 1. If session provided, check user's slots first (most likely to match)
     if (session) {
       try {
-        const sessionData = JSON.parse(decrypt(session))
+        const sessionData = requireSession(session)
         const userId = sessionData.userId
 
         // Get user's slots

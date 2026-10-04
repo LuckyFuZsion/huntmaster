@@ -14,7 +14,8 @@ function decryptSession(sessionToken) {
   if (!sessionToken) return null;
   try {
     // Session token is base64 encoded JSON
-    const decoded = atob(sessionToken);
+    // Token is "<base64 json>.<signature>"; only the payload is decoded client-side
+    const decoded = atob(sessionToken.split(".")[0]);
     const sessionData = JSON.parse(decoded);
     return sessionData;
   } catch (e) {

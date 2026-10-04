@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 // Get Supabase credentials with validation
 function getSupabaseConfig() {
@@ -20,7 +20,7 @@ function getSupabaseConfig() {
 
 // Create a single supabase client for interacting with your database
 // Use lazy initialization to avoid errors if env vars aren't set during build
-let supabaseClient: ReturnType<typeof createClient> | null = null
+let supabaseClient: SupabaseClient<any, 'public', any> | null = null
 
 export function getSupabaseClient() {
   if (!supabaseClient) {
@@ -44,7 +44,7 @@ export function getSupabaseClient() {
 
 // For backwards compatibility, export as supabase with lazy getter
 // This ensures the client is only created when actually used
-const supabaseProxy = new Proxy({} as ReturnType<typeof createClient>, {
+const supabaseProxy = new Proxy({} as SupabaseClient<any, 'public', any>, {
   get(_target, prop) {
     const client = getSupabaseClient()
     const value = (client as any)[prop]

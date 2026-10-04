@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { decrypt } from "@/lib/protection"
+import { requireSession } from "@/lib/session"
 
 // Simple in-memory cache with TTL
 const cache = new Map<string, { data: any; timestamp: number }>()
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
     }
 
-    const sessionData = JSON.parse(decrypt(session))
+    const sessionData = requireSession(session)
     const userId = sessionData.userId
 
     if (action === "get") {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { decrypt } from "@/lib/protection"
+import { requireSession } from "@/lib/session"
 
 // Helper to require admin session
 function requireAdminSession(request: Request) {
@@ -10,7 +10,7 @@ function requireAdminSession(request: Request) {
 
   try {
     const session = authHeader.replace("Bearer ", "")
-    const sessionData = JSON.parse(decrypt(session))
+    const sessionData = requireSession(session)
     if (!sessionData.isAdmin) {
       throw new Error("Forbidden")
     }

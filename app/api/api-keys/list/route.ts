@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { firestoreAdmin } from "@/lib/firestore-admin";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
     }
 
-    const sessionData = JSON.parse(decrypt(session));
+    const sessionData = requireSession(session);
     const userId = sessionData.userId;
 
     const apiKeys = await firestoreAdmin.apiKeys.findByUserId(userId);

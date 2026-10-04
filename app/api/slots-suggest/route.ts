@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, getSupabaseClient } from "@/lib/supabase-admin";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 import {
   GAME_REVIEWS_SELECT,
   GAME_REVIEWS_SELECT_MINIMAL,
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     try {
       const sessionParam = searchParams.get("session");
       if (sessionParam) {
-        const sessionData = JSON.parse(decrypt(sessionParam));
+        const sessionData = requireSession(sessionParam);
         userId = sessionData.userId || null;
       }
     } catch (e) {

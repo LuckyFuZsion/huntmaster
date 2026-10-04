@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 
 export async function GET(request: Request) {
   try {
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "Session required" }, { status: 401 });
     }
 
-    const sessionData = JSON.parse(decrypt(sessionParam));
+    const sessionData = requireSession(sessionParam);
     const userId = sessionData.userId;
 
     if (!userId) {

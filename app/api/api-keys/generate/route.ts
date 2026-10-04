@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { firestoreAdmin } from "@/lib/firestore-admin";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
 
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
     }
 
-    const sessionData = JSON.parse(decrypt(session));
+    const sessionData = requireSession(session);
     const userId = sessionData.userId;
 
     // Generate a random API key (32 bytes = 64 hex characters)

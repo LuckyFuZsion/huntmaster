@@ -1,34 +1,11 @@
-// ❌ DISABLED: This route made external API calls and has been disabled
-// The main /api/slotslaunch route uses the database instead
-// This catch-all proxy route is no longer needed
+// DISABLED: this catch-all proxy made paid external API calls.
+// The main /api/slotslaunch route serves the same data from the database.
 import { NextResponse } from "next/server";
 
-export async function GET(request: Request, { params }: { params: { path: string[] } }) {
-  return forward(request, params.path);
-}
+const gone = () => NextResponse.json({ success: false, error: "This endpoint has been removed" }, { status: 410 });
 
-export async function POST(request: Request, { params }: { params: { path: string[] } }) {
-  return forward(request, params.path);
-}
-
-export async function PUT(request: Request, { params }: { params: { path: string[] } }) {
-  return forward(request, params.path);
-}
-
-export async function PATCH(request: Request, { params }: { params: { path: string[] } }) {
-  return forward(request, params.path);
-}
-
-export async function DELETE(request: Request, { params }: { params: { path: string[] } }) {
-  return forward(request, params.path);
-}
-
-
-
-
-
-
-
-
-
-
+export const GET = gone;
+export const POST = gone;
+export const PUT = gone;
+export const PATCH = gone;
+export const DELETE = gone;

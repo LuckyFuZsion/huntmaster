@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
     }
 
-    const sessionData = JSON.parse(decrypt(session));
+    const sessionData = requireSession(session);
     const isAdmin = sessionData.isAdmin;
 
     if (!isAdmin) {

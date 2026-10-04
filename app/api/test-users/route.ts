@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
+import { verifySession } from "@/lib/session"
 
-export async function GET() {
+export async function GET(request: Request) {
+  const session = verifySession(new URL(request.url).searchParams.get("session"))
+  if (!session?.isAdmin) {
+    return NextResponse.json({ success: false, error: "Admin privileges required" }, { status: 403 })
+  }
   try {
     // Get user information from environment variables
     const users = [

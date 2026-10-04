@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { decrypt } from "@/lib/protection";
+import { requireSession } from "@/lib/session";
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "winAmount must be a non-negative number" }, { status: 400 });
     }
 
-    const sessionData = JSON.parse(decrypt(session));
+    const sessionData = requireSession(session);
     const userId = sessionData.userId;
 
     // COST OPTIMIZATION: Removed game verification entirely to reduce API costs

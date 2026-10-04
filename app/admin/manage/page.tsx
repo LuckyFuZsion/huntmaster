@@ -37,7 +37,7 @@ export default function AdminManage() {
       }
 
       // Fetch environment variable users
-      fetch("/api/test-users")
+      fetch(`/api/test-users?session=${encodeURIComponent(session)}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.error) {
